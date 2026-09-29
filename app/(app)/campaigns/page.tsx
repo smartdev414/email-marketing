@@ -17,18 +17,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { auth } from "@/auth";
+import { mailboxReady } from "@/lib/google";
+import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 import { rate } from "@/lib/stats";
 
 export const metadata: Metadata = { title: "Campaigns" };
 
 export default async function CampaignsPage() {
-  const [campaigns, templates, tagRows] = await Promise.all([
+  const session = await auth();
+
+  const [campaigns, templates, mailboxes] = await Promise.all([
     prisma.campaign.findMany({
       orderBy: { createdAt: "desc" },
       include: {
         template: { select: { name: true } },
         fromUser: { select: { name: true, email: true } },
+        senders: { select: { email: true }, orderBy: { createdAt: "asc" } },
         _count: { select: { recipients: true } },
       },
     }),
@@ -37,10 +43,21 @@ export default async function CampaignsPage() {
       orderBy: { name: "asc" },
       select: { id: true, name: true, subject: true },
     }),
-    prisma.contact.findMany({ select: { tags: true }, take: 2000 }),
+    prisma.emailAccount.findMany({
+      where: { userId: session?.user?.id ?? "", isActive: true },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, email: true, dailyLimit: true, scope: true, refreshToken: true },
+    }),
   ]);
 
-  const tags = [...new Set(tagRows.flatMap((row) => row.tags))].sort();
+  const usable = mailboxes.filter(mailboxReady);
+  const quotas = await mailboxQuotas(usable);
+  const senders = usable.map((mailbox) => ({
+    id: mailbox.id,
+    email: mailbox.email,
+    remaining: quotas.get(mailbox.id)?.remaining ?? 0,
+    limit: quotas.get(mailbox.id)?.limit ?? 0,
+  }));
 
   // Per-campaign counters in one grouped query rather than N round-trips.
   // Counting a nullable column counts its non-null rows, which is exactly
@@ -56,9 +73,9 @@ export default async function CampaignsPage() {
     <>
       <PageHeader
         title="Campaigns"
-        description="Each campaign draws a random audience from your contacts and sends from your Gmail."
+        description="Each campaign draws a random audience from your contacts and rotates sending across the Gmail mailboxes you pick."
       >
-        <CreateCampaignDialog templates={templates} tags={tags} />
+        <CreateCampaignDialog templates={templates} senders={senders} />
       </PageHeader>
 
       {templates.length === 0 ? (
@@ -77,7 +94,7 @@ export default async function CampaignsPage() {
           title="No campaigns yet"
           description="Create a campaign, review the audience it drew, then release the first batch."
         >
-          <CreateCampaignDialog templates={templates} tags={tags} />
+          <CreateCampaignDialog templates={templates} senders={senders} />
         </EmptyState>
       ) : (
         <Card>
@@ -112,7 +129,11 @@ export default async function CampaignsPage() {
                         </Link>
                         <p className="text-muted-foreground text-xs">
                           {campaign.template.name} ·{" "}
-                          {campaign.fromUser.name ?? campaign.fromUser.email}
+                          {campaign.senders.length > 1
+                            ? `${campaign.senders.length} mailboxes`
+                            : (campaign.senders[0]?.email ??
+                              campaign.fromUser.name ??
+                              campaign.fromUser.email)}
                         </p>
                       </TableCell>
                       <TableCell>

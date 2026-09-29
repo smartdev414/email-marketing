@@ -10,7 +10,6 @@ import { ContactDialog } from "@/components/contacts/contact-dialog";
 import { ContactRowActions } from "@/components/contacts/contact-row-actions";
 import { ImportContactsDialog } from "@/components/contacts/import-contacts-dialog";
 import { WarehouseImportDialog } from "@/components/contacts/warehouse-import-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -144,7 +143,6 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
                   <TableHead>Contact</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Tags</TableHead>
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
@@ -167,18 +165,6 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
                       <StatusBadge status={contact.status} />
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {contact.tags.slice(0, 3).map((tag) => (
-                          <Badge key={tag} variant="secondary" className="font-normal">
-                            {tag}
-                          </Badge>
-                        ))}
-                        {contact.tags.length > 3 ? (
-                          <Badge variant="secondary">+{contact.tags.length - 3}</Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
                       <ContactRowActions
                         contact={{
                           id: contact.id,
@@ -190,7 +176,6 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
                           phone: contact.phone ?? "",
                           country: contact.country ?? "",
                           status: contact.status,
-                          tags: contact.tags.join(", "),
                           notes: contact.notes ?? "",
                         }}
                       />

@@ -60,8 +60,12 @@ export function CampaignControls({ campaignId, status, pending, batchSize }: Pro
         );
       }
 
+      if (result.warning) toast.warning(result.warning);
+
       if (result.quotaReached) {
-        toast.warning("Daily sending limit reached — continue tomorrow to protect your domain.");
+        toast.warning(
+          "Every mailbox on this campaign hit its daily limit — continue tomorrow to protect your domains.",
+        );
       }
 
       router.refresh();

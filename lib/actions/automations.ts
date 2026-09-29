@@ -118,7 +118,8 @@ export async function runAutomations(): Promise<
     const baseWhere = {
       sentAt: { lte: cutoff },
       repliedAt: null,
-      assignedToId: { not: null },
+      // Follow-ups must leave from the mailbox that owns the thread.
+      emailAccountId: { not: null },
       contact: { status: "ACTIVE" as const },
       // One follow-up per rule per recipient.
       runs: { none: { automationId: automation.id } },
@@ -131,12 +132,13 @@ export async function runAutomations(): Promise<
 
     const matches = await prisma.campaignRecipient.findMany({
       where,
-      include: { contact: true, assignedTo: true, campaign: true },
+      include: { contact: true, assignedTo: true, campaign: true, emailAccount: true },
       take: 100,
     });
 
     for (const [index, recipient] of matches.entries()) {
-      if (!recipient.assignedToId) {
+      const mailbox = recipient.emailAccount;
+      if (!mailbox || !mailbox.isActive) {
         skipped += 1;
         continue;
       }
@@ -157,7 +159,8 @@ export async function runAutomations(): Promise<
 
       if (index > 0) await sleep(sendDelay());
 
-      const variables = buildVariables(recipient.contact, recipient.assignedTo?.name);
+      const senderName = mailbox.fromName ?? recipient.assignedTo?.name;
+      const variables = buildVariables(recipient.contact, senderName);
       const subject = recipient.subject
         ? `Re: ${recipient.subject}`
         : renderTemplate(automation.template.subject, variables);
@@ -169,8 +172,8 @@ export async function runAutomations(): Promise<
 
       try {
         await sendEmail({
-          userId: recipient.assignedToId,
-          fromName: recipient.assignedTo?.name,
+          emailAccountId: mailbox.id,
+          fromName: senderName,
           to: recipient.contact.email,
           subject,
           html,

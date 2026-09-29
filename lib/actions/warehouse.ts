@@ -10,22 +10,26 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * `hl_contacts` is the raw GoHighLevel warehouse — tens of millions of rows,
- * loaded straight from the SQL dump and never written to by the app. You do not
- * campaign to all of it: you draw a slice into `Contact` (the working set) and
- * campaigns sample from there.
+ * loaded straight from the SQL dump and never written to by the app. Every
+ * sendable row is copied into `Contact` (the working set) and campaigns sample
+ * from there.
  *
  * Everything here is written for warehouse scale — no `COUNT(*)`, no
- * `ORDER BY random()` over the whole table.
+ * `ORDER BY random()`, no `OFFSET`; the import walks the primary key.
  */
 
+/** Rows read from the warehouse per query. Walks the primary key, so each is an index range scan. */
+const CHUNK_SIZE = 5_000;
+/** Rows per INSERT — keeps the bind-parameter count well under Postgres' 65k limit. */
+const INSERT_SIZE = 2_000;
+/** Wall-clock budget per call. The dialog keeps calling until the warehouse is drained. */
+const TIME_BUDGET_MS = 20_000;
+
 const importSchema = z.object({
-  /** How many contacts to pull into the working set. */
-  limit: z.number().int().min(1).max(50_000),
-  /** Match against `hl_contacts.tags` (substring, case-insensitive). */
-  tag: z.string().trim().max(120).optional(),
-  businessId: z.number().int().optional(),
-  /** Tag every imported contact with this, so campaigns can target the batch. */
-  label: z.string().trim().max(60).optional(),
+  /** Resume after this `hl_contacts.id` (stringified bigint). Omit to start from the beginning. */
+  cursor: z.string().regex(/^\d+$/).optional(),
+  /** Stop after importing this many in this call. Omit to pull as many as the time budget allows. */
+  limit: z.number().int().min(1).optional(),
 });
 
 export type WarehouseImportInput = z.input<typeof importSchema>;
@@ -53,7 +57,6 @@ type WarehouseRow = {
   email: string | null;
   full_name: string | null;
   phone: string | null;
-  tags: string | null;
   city: string | null;
   state: string | null;
   country: string | null;
@@ -77,11 +80,6 @@ function splitName(fullName: string | null, email: string) {
   };
 }
 
-function parseTags(tags: string | null) {
-  if (!tags) return [];
-  return [...new Set(tags.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
-}
-
 export type WarehouseImportResult =
   | {
       ok: true;
@@ -89,11 +87,20 @@ export type WarehouseImportResult =
       imported: number;
       duplicates: number;
       rejected: number;
+      /** Pass back as `cursor` to continue. */
+      cursor: string;
+      /** True once the end of `hl_contacts` has been reached. */
+      done: boolean;
     }
   | { ok: false; error: string };
 
+/**
+ * Pulls every eligible warehouse row into `Contact`, walking `hl_contacts` in
+ * primary-key order. One call works for about `TIME_BUDGET_MS` and returns a
+ * cursor; call again with it until `done` is true.
+ */
 export async function importFromWarehouse(
-  input: WarehouseImportInput,
+  input: WarehouseImportInput = {},
 ): Promise<WarehouseImportResult> {
   await requireUser();
 
@@ -102,115 +109,104 @@ export async function importFromWarehouse(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid import" };
   }
 
-  const { limit, tag, businessId, label } = parsed.data;
+  const { limit } = parsed.data;
+  let cursor = BigInt(parsed.data.cursor ?? 0);
+  const startedAt = Date.now();
 
-  // Pull extra rows because screening, suppression and dedupe all reject some.
-  const oversample = Math.min(limit * 4, 200_000);
+  let scanned = 0;
+  let imported = 0;
+  let duplicates = 0;
+  let rejected = 0;
+  let done = false;
 
-  const conditions = [
-    Prisma.sql`h."email" IS NOT NULL`,
-    Prisma.sql`h."email" <> ''`,
-    Prisma.sql`(h."is_spam" IS NULL OR h."is_spam" = false)`,
-    // Skip anything already pulled in.
-    Prisma.sql`NOT EXISTS (SELECT 1 FROM "Contact" c WHERE c."sourceId" = h."id")`,
-    // Never re-import a blocked address.
-    Prisma.sql`NOT EXISTS (
-      SELECT 1 FROM "Suppression" s
-      WHERE (s."type" = 'EMAIL' AND s."value" = lower(h."email"))
-         OR (s."type" = 'DOMAIN' AND s."value" = split_part(lower(h."email"), '@', 2))
-    )`,
-  ];
-
-  if (tag) conditions.push(Prisma.sql`h."tags" ILIKE ${`%${tag}%`}`);
-  if (businessId !== undefined) conditions.push(Prisma.sql`h."business_id" = ${businessId}`);
-
-  let rows: WarehouseRow[];
-
-  if (tag || businessId !== undefined) {
-    // A filter is present, so let Postgres scan and stop at the limit. Add the
-    // optional indexes (prisma/sql/hl_contacts_indexes.sql) to make this fast.
-    rows = await prisma.$queryRaw<WarehouseRow[]>`
-      SELECT h."id", h."email", h."full_name", h."phone", h."tags",
+  while (Date.now() - startedAt < TIME_BUDGET_MS && (limit === undefined || imported < limit)) {
+    const rows = await prisma.$queryRaw<WarehouseRow[]>`
+      SELECT h."id", h."email", h."full_name", h."phone",
              h."city", h."state", h."country", h."campaign", h."lead_source"
       FROM "hl_contacts" h
-      WHERE ${Prisma.join(conditions, " AND ")}
-      LIMIT ${oversample}
+      WHERE h."id" > ${cursor}
+        AND h."email" IS NOT NULL
+        AND h."email" <> ''
+        AND (h."is_spam" IS NULL OR h."is_spam" = false)
+        -- Skip anything already pulled in.
+        AND NOT EXISTS (SELECT 1 FROM "Contact" c WHERE c."sourceId" = h."id")
+        -- Never re-import a blocked address.
+        AND NOT EXISTS (
+          SELECT 1 FROM "Suppression" s
+          WHERE (s."type" = 'EMAIL' AND s."value" = lower(h."email"))
+             OR (s."type" = 'DOMAIN' AND s."value" = split_part(lower(h."email"), '@', 2))
+        )
+      ORDER BY h."id"
+      LIMIT ${CHUNK_SIZE}
     `;
-  } else {
-    // No filter: sample random pages instead of ordering 50M rows at random.
-    const { estimatedRows } = await getWarehouseStats();
-    const percent =
-      estimatedRows > 0
-        ? Math.min(100, Math.max(0.001, (oversample / estimatedRows) * 100 * 3))
-        : 100;
 
-    rows = await prisma.$queryRaw<WarehouseRow[]>`
-      SELECT h."id", h."email", h."full_name", h."phone", h."tags",
-             h."city", h."state", h."country", h."campaign", h."lead_source"
-      FROM "hl_contacts" h TABLESAMPLE SYSTEM (${Prisma.raw(percent.toFixed(6))})
-      WHERE ${Prisma.join(conditions, " AND ")}
-      LIMIT ${oversample}
-    `;
-  }
-
-  const seen = new Set<string>();
-  const candidates: Prisma.ContactCreateManyInput[] = [];
-  let rejected = 0;
-
-  for (const row of rows) {
-    if (candidates.length >= limit) break;
-
-    const email = row.email!.trim().toLowerCase();
-
-    if (seen.has(email)) continue;
-    seen.add(email);
-
-    if (screenAddress(email)) {
-      rejected += 1;
-      continue;
+    if (rows.length === 0) {
+      done = true;
+      break;
     }
 
-    const tags = parseTags(row.tags);
-    if (label) tags.push(label.toLowerCase());
+    scanned += rows.length;
 
-    candidates.push({
-      email,
-      ...splitName(row.full_name, email),
-      phone: row.phone,
-      country: row.country,
-      company: null,
-      notes: [row.city, row.state].filter(Boolean).join(", ") || null,
-      tags: [...new Set(tags)],
-      source: row.lead_source ?? row.campaign ?? "hl_contacts",
-      sourceId: row.id,
-      status: "ACTIVE",
-    });
+    const seen = new Set<string>();
+    const candidates: Prisma.ContactCreateManyInput[] = [];
+
+    for (const row of rows) {
+      if (limit !== undefined && imported + candidates.length >= limit) break;
+      cursor = row.id;
+
+      const email = row.email!.trim().toLowerCase();
+
+      if (seen.has(email)) {
+        duplicates += 1;
+        continue;
+      }
+      seen.add(email);
+
+      if (screenAddress(email)) {
+        rejected += 1;
+        continue;
+      }
+
+      candidates.push({
+        email,
+        ...splitName(row.full_name, email),
+        phone: row.phone,
+        country: row.country,
+        company: null,
+        notes: [row.city, row.state].filter(Boolean).join(", ") || null,
+        source: row.lead_source ?? row.campaign ?? "hl_contacts",
+        sourceId: row.id,
+        status: "ACTIVE",
+      });
+    }
+
+    for (let index = 0; index < candidates.length; index += INSERT_SIZE) {
+      const slice = candidates.slice(index, index + INSERT_SIZE);
+      // `skipDuplicates` leans on Contact.email being unique.
+      const created = await prisma.contact.createMany({ data: slice, skipDuplicates: true });
+      imported += created.count;
+      duplicates += slice.length - created.count;
+    }
+
+    // A short page means the end of the table, unless the limit cut it off early.
+    if (rows.length < CHUNK_SIZE && cursor === rows[rows.length - 1].id) {
+      done = true;
+      break;
+    }
   }
 
-  if (candidates.length === 0) {
-    return {
-      ok: false,
-      error:
-        rows.length === 0
-          ? "No warehouse rows matched. Check the tag filter, or load the dump first."
-          : "Every sampled row was already imported or failed screening.",
-    };
+  if (imported > 0) {
+    revalidatePath("/contacts");
+    revalidatePath("/dashboard");
   }
-
-  // `skipDuplicates` leans on Contact.email being unique.
-  const created = await prisma.contact.createMany({
-    data: candidates,
-    skipDuplicates: true,
-  });
-
-  revalidatePath("/contacts");
-  revalidatePath("/dashboard");
 
   return {
     ok: true,
-    scanned: rows.length,
-    imported: created.count,
-    duplicates: candidates.length - created.count,
+    scanned,
+    imported,
+    duplicates,
     rejected,
+    cursor: cursor.toString(),
+    done,
   };
 }

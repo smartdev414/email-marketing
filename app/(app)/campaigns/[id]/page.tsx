@@ -33,6 +33,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
     include: {
       template: true,
       fromUser: { select: { name: true, email: true } },
+      senders: { select: { id: true, email: true, isActive: true }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -48,6 +49,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         contact: {
           select: { email: true, firstName: true, lastName: true, company: true },
         },
+        emailAccount: { select: { email: true } },
       },
     }),
   ]);
@@ -80,9 +82,23 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         <Badge variant="secondary" className="font-normal">
           {campaign.template.name}
         </Badge>
-        <Badge variant="secondary" className="font-normal">
-          From {campaign.fromUser.name ?? campaign.fromUser.email}
-        </Badge>
+        {campaign.senders.length === 0 ? (
+          <Badge variant="destructive" className="font-normal">
+            No sending mailbox
+          </Badge>
+        ) : (
+          campaign.senders.map((sender) => (
+            <Badge
+              key={sender.id}
+              variant={sender.isActive ? "secondary" : "outline"}
+              className="font-normal"
+              title={sender.isActive ? "Sending mailbox" : "Paused on the Integrations page"}
+            >
+              From {sender.email}
+              {sender.isActive ? "" : " (paused)"}
+            </Badge>
+          ))
+        )}
         {campaign.trackOpens ? (
           <Badge variant="outline" className="font-normal">
             Open tracking on
@@ -152,6 +168,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
               <TableRow>
                 <TableHead>Contact</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Mailbox</TableHead>
                 <TableHead className="text-right">Opens</TableHead>
                 <TableHead className="text-right">Clicks</TableHead>
                 <TableHead>Sent</TableHead>
@@ -178,6 +195,9 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
                         {recipient.error}
                       </p>
                     ) : null}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {recipient.emailAccount?.email ?? "—"}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {recipient.openCount}

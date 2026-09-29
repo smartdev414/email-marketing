@@ -1,10 +1,11 @@
 "use client";
 
 import { Database } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { importFromWarehouse, type WarehouseImportInput } from "@/lib/actions/warehouse";
+import { importFromWarehouse } from "@/lib/actions/warehouse";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,6 +19,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+type Progress = { scanned: number; imported: number; duplicates: number; rejected: number };
+
+const EMPTY: Progress = { scanned: 0, imported: 0, duplicates: 0, rejected: 0 };
+
 export function WarehouseImportDialog({
   estimatedRows,
   imported,
@@ -25,40 +30,66 @@ export function WarehouseImportDialog({
   estimatedRows: number;
   imported: number;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-  const [values, setValues] = useState<WarehouseImportInput>({
-    limit: 1000,
-    tag: "",
-    label: "",
-  });
+  const [running, setRunning] = useState(false);
+  const [limit, setLimit] = useState("");
+  const [progress, setProgress] = useState<Progress>(EMPTY);
+  const stopRequested = useRef(false);
+  // Survives a Stop, so the next run resumes instead of rescanning from the top.
+  const resumeFrom = useRef<string | undefined>(undefined);
 
-  function submit(event: React.FormEvent) {
+  async function run(event: React.FormEvent) {
     event.preventDefault();
 
-    startTransition(async () => {
-      const result = await importFromWarehouse({
-        limit: Number(values.limit),
-        tag: values.tag || undefined,
-        label: values.label || undefined,
-      });
+    const max = limit ? Number(limit) : undefined;
+    const totals = { ...EMPTY };
+    let cursor = resumeFrom.current;
 
-      if (result.ok) {
-        toast.success(`Imported ${result.imported.toLocaleString()} contacts`);
-        if (result.duplicates + result.rejected > 0) {
-          toast.info(
-            `Skipped ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"} and ${result.rejected} screened out, from ${result.scanned.toLocaleString()} rows scanned.`,
-          );
+    stopRequested.current = false;
+    setRunning(true);
+    setProgress(totals);
+
+    try {
+      // Each call works for ~20s and hands back a cursor; keep going until the
+      // warehouse is drained, the cap is hit, or the user stops it.
+      while (!stopRequested.current) {
+        const remaining = max !== undefined ? max - totals.imported : undefined;
+        if (remaining !== undefined && remaining <= 0) break;
+
+        const result = await importFromWarehouse({ cursor, limit: remaining });
+
+        if (!result.ok) {
+          toast.error(result.error);
+          break;
         }
-        setOpen(false);
-      } else {
-        toast.error(result.error);
+
+        totals.scanned += result.scanned;
+        totals.imported += result.imported;
+        totals.duplicates += result.duplicates;
+        totals.rejected += result.rejected;
+        setProgress({ ...totals });
+
+        cursor = result.cursor;
+        resumeFrom.current = result.done ? undefined : cursor;
+        if (result.done) break;
       }
-    });
+
+      if (totals.scanned === 0) {
+        toast.info("Nothing new to pull — every sendable warehouse row is already a contact.");
+      } else {
+        toast.success(`Imported ${totals.imported.toLocaleString()} contacts`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Warehouse import failed");
+    } finally {
+      setRunning(false);
+      router.refresh();
+    }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(next) => !running && setOpen(next)}>
       <DialogTrigger asChild>
         <Button variant="outline">
           <Database className="size-4" />
@@ -67,7 +98,7 @@ export function WarehouseImportDialog({
       </DialogTrigger>
 
       <DialogContent className="sm:max-w-lg">
-        <form onSubmit={submit}>
+        <form onSubmit={run}>
           <DialogHeader>
             <DialogTitle>Pull contacts from the warehouse</DialogTitle>
             <DialogDescription>
@@ -79,66 +110,60 @@ export function WarehouseImportDialog({
 
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="wh-limit">How many to pull</Label>
+              <Label htmlFor="wh-limit">Maximum to pull</Label>
               <Input
                 id="wh-limit"
                 type="number"
                 min={1}
-                max={50000}
-                required
-                value={values.limit}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, limit: Number(event.target.value) }))
-                }
+                placeholder="Everything"
+                disabled={running}
+                value={limit}
+                onChange={(event) => setLimit(event.target.value)}
               />
               <p className="text-muted-foreground text-xs">
-                Drawn at random across the whole table when no tag filter is set.
+                Leave blank to pull every sendable row. Large warehouses take a while — keep this
+                dialog open, or stop and run it again later to pick up where it left off.
               </p>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="wh-tag">Filter by warehouse tag</Label>
-              <Input
-                id="wh-tag"
-                placeholder="ae-lead"
-                value={values.tag ?? ""}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, tag: event.target.value }))
-                }
-              />
-              <p className="text-muted-foreground text-xs">
-                Matches <code>hl_contacts.tags</code> as a substring. Leave blank for a random
-                sample of everything.
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="wh-label">Label this batch</Label>
-              <Input
-                id="wh-label"
-                placeholder="oct-batch-1"
-                value={values.label ?? ""}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, label: event.target.value }))
-                }
-              />
-              <p className="text-muted-foreground text-xs">
-                Added as a tag so a campaign can target exactly this batch.
-              </p>
-            </div>
+            {running || progress.scanned > 0 ? (
+              <div className="rounded-lg border p-3 text-sm">
+                <p className="font-medium">
+                  {progress.imported.toLocaleString()} imported
+                  {running ? "…" : ""}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  {progress.scanned.toLocaleString()} rows scanned ·{" "}
+                  {progress.duplicates.toLocaleString()} duplicates ·{" "}
+                  {progress.rejected.toLocaleString()} screened out
+                </p>
+              </div>
+            ) : null}
 
             <p className="text-muted-foreground border-t pt-3 text-xs">
-              Role mailboxes, disposable domains, unsubscribes and bounced addresses are filtered
-              out during the pull, and nothing already imported is pulled twice.
+              Role mailboxes, disposable domains, spam rows, unsubscribes and bounced addresses are
+              filtered out during the pull, and nothing already imported is pulled twice.
             </p>
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Pulling…" : "Pull contacts"}
+            {running ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  stopRequested.current = true;
+                }}
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+                Close
+              </Button>
+            )}
+            <Button type="submit" disabled={running}>
+              {running ? "Pulling…" : "Pull contacts"}
             </Button>
           </DialogFooter>
         </form>

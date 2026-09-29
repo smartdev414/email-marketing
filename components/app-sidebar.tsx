@@ -3,6 +3,7 @@
 import {
   Inbox,
   LayoutDashboard,
+  Plug,
   MailCheck,
   Send,
   Settings,
@@ -44,6 +45,7 @@ const SECTIONS = [
       { href: "/contacts", label: "Contacts", icon: Users },
       { href: "/templates", label: "Templates", icon: FileText },
       { href: "/automations", label: "Automations", icon: Workflow },
+      { href: "/integrations", label: "Integrations", icon: Plug },
     ],
   },
 ] as const;

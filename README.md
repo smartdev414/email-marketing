@@ -89,8 +89,14 @@ current grant provides.
 
 ```
 http://localhost:3000/api/auth/callback/google
+http://localhost:3000/api/integrations/google/callback
 https://your-domain.com/api/auth/callback/google
+https://your-domain.com/api/integrations/google/callback
 ```
+
+The second pair is for **Integrations → Connect Gmail account**, which adds
+extra sending mailboxes. While the consent screen is in *Testing*, every
+mailbox you connect must be listed as a test user.
 
 **5. Authorised JavaScript origin:** `http://localhost:3000` (and your domain).
 
@@ -112,29 +118,34 @@ psql "$DATABASE_URL" -f hl_contacts.sql
 npm run db:index-warehouse
 ```
 
-Then in the app: **Contacts → Pull from warehouse**. That draws a batch into the
-`Contact` working set, screening out role mailboxes, disposable domains and
-anything already unsubscribed or bounced, and skipping rows already pulled in.
+Then in the app: **Contacts → Pull from warehouse**. That copies every sendable
+row into the `Contact` working set (or up to an optional maximum), screening out
+role mailboxes, disposable domains, spam rows and anything already unsubscribed
+or bounced, and skipping rows already pulled in.
 
 **Why two tables?** You never campaign to 50M rows. The warehouse stays raw and
 reloadable; `Contact` holds the few thousand you are actually working, along with
 their status. Nothing in the warehouse gets mutated, and a re-import can't
 resurrect someone who unsubscribed — the suppression list outlives both.
 
-Random sampling never does `ORDER BY random()` over the full table: with no
-filter it uses `TABLESAMPLE SYSTEM` on random pages, and with a tag filter it
-scans and stops at the limit (fast once the trigram index exists).
+The pull walks `hl_contacts` in primary-key order in 5,000-row chunks. Each
+server call works for about 20 seconds and returns a cursor, and the dialog keeps
+calling until the table is drained — so it never hits a function timeout, and
+you can stop it and resume later.
 
 ---
 
 ## Sending a campaign
 
-1. **Templates** → write the email. Watch the deliverability panel.
-2. **Campaigns → New campaign** → pick the template, set how many contacts to
-   draw, choose a batch size.
-3. Open the campaign → **Send next N**. Repeat to walk the audience. Each request
+1. **Integrations** → connect one or more Gmail accounts. The account you sign
+   in with is added automatically the first time.
+2. **Templates** → write the email. Watch the deliverability panel.
+3. **Campaigns → New campaign** → pick the template, tick the mailboxes to send
+   from, set how many contacts to draw, choose a batch size. Sends rotate
+   round-robin across the ticked mailboxes, each capped at its own daily limit.
+4. Open the campaign → **Send next N**. Repeat to walk the audience. Each request
    stays short, and the daily cap stops you before Gmail does.
-4. **Check replies** on the campaign, or **Sync Gmail** in the inbox.
+5. **Check replies** on the campaign, or **Sync Gmail** in the inbox.
 
 Sending is deliberately manual per batch. Nothing goes out on a timer that you
 did not click.
@@ -261,6 +272,7 @@ Add the production callback to the OAuth client, or sign-in will fail with
 
 ```
 https://email-marketing-platform-azure.vercel.app/api/auth/callback/google
+https://email-marketing-platform-azure.vercel.app/api/integrations/google/callback
 ```
 
 Authorised JavaScript origin: `https://email-marketing-platform-azure.vercel.app`

@@ -18,8 +18,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-const SAMPLE = `email,first name,last name,company,job title,country,tags
-jordan@acme.com,Jordan,Lee,Acme Inc.,Head of Sales,United States,saas`;
+const SAMPLE = `email,first name,last name,company,job title,country
+jordan@acme.com,Jordan,Lee,Acme Inc.,Head of Sales,United States`;
 
 export function ImportContactsDialog() {
   const [open, setOpen] = useState(false);

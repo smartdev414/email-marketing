@@ -22,16 +22,10 @@ const contactSchema = z.object({
   status: z
     .enum(["ACTIVE", "REPLIED", "BOUNCED", "UNSUBSCRIBED", "DO_NOT_CONTACT"])
     .default("ACTIVE"),
-  tags: z.string().trim().optional(),
   notes: z.string().trim().max(2000).optional(),
 });
 
 export type ContactInput = z.input<typeof contactSchema>;
-
-function parseTags(tags?: string) {
-  if (!tags) return [];
-  return [...new Set(tags.split(",").map((tag) => tag.trim()).filter(Boolean))];
-}
 
 function toData(values: z.output<typeof contactSchema>) {
   return {
@@ -43,7 +37,6 @@ function toData(values: z.output<typeof contactSchema>) {
     phone: values.phone || null,
     country: values.country || null,
     status: values.status as ContactStatus,
-    tags: parseTags(values.tags),
     notes: values.notes || null,
   };
 }
@@ -149,7 +142,6 @@ const HEADER_ALIASES: Record<string, keyof z.input<typeof contactSchema>> = {
   phone: "phone",
   "phone number": "phone",
   country: "country",
-  tags: "tags",
   notes: "notes",
 };
 

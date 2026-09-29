@@ -65,6 +65,8 @@ export function SyncInboxButton() {
                 : "No new replies",
             );
 
+          if (replies.ok && replies.warning) toast.warning(replies.warning);
+
           if (bounces.ok && bounces.bounced > 0) {
             toast.warning(`${bounces.bounced} bounced — addresses suppressed`);
           }

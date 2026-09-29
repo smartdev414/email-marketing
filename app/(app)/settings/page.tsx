@@ -1,12 +1,13 @@
-import { CheckCircle2, ShieldAlert, XCircle } from "lucide-react";
+import { Mail, ShieldAlert } from "lucide-react";
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { auth } from "@/auth";
-import { GOOGLE_SCOPES, gmailCapabilities } from "@/auth.config";
 import { PageHeader } from "@/components/page-header";
 import { SignOutButton } from "@/components/sign-out-button";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -17,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DAILY_SEND_LIMIT, MAX_SEND_GAP_MS, MIN_SEND_GAP_MS } from "@/lib/deliverability";
-import { remainingDailyQuota } from "@/lib/suppression";
+import { mailboxReady } from "@/lib/google";
+import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 import { appUrl, trackingUrl } from "@/lib/tracking";
 
@@ -27,14 +29,11 @@ export default async function SettingsPage() {
   const session = await auth();
   const userId = session?.user?.id;
 
-  const [account, quota, suppressions, suppressionCount, team] = await Promise.all([
-    userId
-      ? prisma.account.findFirst({
-          where: { userId, provider: "google" },
-          select: { scope: true, refresh_token: true, expires_at: true },
-        })
-      : null,
-    userId ? remainingDailyQuota(userId) : { limit: DAILY_SEND_LIMIT, sentToday: 0, remaining: 0 },
+  const [mailboxes, suppressions, suppressionCount, team] = await Promise.all([
+    prisma.emailAccount.findMany({
+      where: { userId: userId ?? "" },
+      select: { id: true, dailyLimit: true, isActive: true, scope: true, refreshToken: true },
+    }),
     prisma.suppression.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
     prisma.suppression.count(),
     prisma.user.findMany({
@@ -43,22 +42,20 @@ export default async function SettingsPage() {
     }),
   ]);
 
-  const { canSend, canRead } = gmailCapabilities(account?.scope);
-  const grantedScopes = (account?.scope ?? "").split(/\s+/).filter(Boolean);
-  const needsReconnect = !canSend || !canRead || !account?.refresh_token;
-
-  // What the app needs to be able to do, not which exact scope strings grant it.
-  const capabilities = [
-    { label: "Send campaign email from your mailbox", ok: canSend },
-    { label: "Read your threads to detect replies and bounces", ok: canRead },
-    { label: "Keep sending after the access token expires (refresh token)", ok: Boolean(account?.refresh_token) },
-  ];
+  const sending = mailboxes.filter((mailbox) => mailbox.isActive && mailboxReady(mailbox));
+  const quotas = await mailboxQuotas(mailboxes);
+  const quota = { sentToday: 0, remaining: 0 };
+  for (const mailbox of mailboxes) {
+    const usage = quotas.get(mailbox.id);
+    quota.sentToday += usage?.sentToday ?? 0;
+    if (sending.includes(mailbox)) quota.remaining += usage?.remaining ?? 0;
+  }
 
   return (
     <>
       <PageHeader
         title="Settings"
-        description="Your Gmail connection, sending limits and the team roster."
+        description="Sending limits, spam guardrails and the team roster."
       >
         <SignOutButton />
       </PageHeader>
@@ -67,7 +64,7 @@ export default async function SettingsPage() {
         <StatCard
           label="Sent today"
           value={quota.sentToday}
-          hint={`Limit ${quota.limit} per mailbox`}
+          hint={`Across ${mailboxes.length} mailbox${mailboxes.length === 1 ? "" : "es"}`}
         />
         <StatCard label="Remaining today" value={quota.remaining} hint="Resets at midnight" />
         <StatCard
@@ -80,69 +77,20 @@ export default async function SettingsPage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle className="text-base">Gmail connection</CardTitle>
+          <CardTitle className="text-base">Sending mailboxes</CardTitle>
           <CardDescription>
-            Campaigns send through your own mailbox using these permissions.
+            {sending.length === 0
+              ? "No mailbox is ready to send. Connect a Gmail account on the Integrations page."
+              : `${sending.length} mailbox${sending.length === 1 ? " is" : "es are"} ready to send. Campaigns rotate between the ones you pick.`}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            {capabilities.map((capability) => (
-              <div key={capability.label} className="flex items-start gap-2 text-sm">
-                {capability.ok ? (
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                ) : (
-                  <XCircle className="text-destructive mt-0.5 size-4 shrink-0" />
-                )}
-                <span>{capability.label}</span>
-              </div>
-            ))}
-          </div>
-
-          <details className="text-muted-foreground text-xs">
-            <summary className="cursor-pointer select-none">
-              {grantedScopes.length > 0
-                ? `${grantedScopes.length} scopes granted`
-                : "No scopes recorded yet"}
-            </summary>
-            <div className="mt-2 space-y-1">
-              <p className="font-medium">Granted</p>
-              {grantedScopes.length > 0 ? (
-                grantedScopes.map((scope) => (
-                  <code key={scope} className="block break-all">
-                    {scope}
-                  </code>
-                ))
-              ) : (
-                <p>&mdash;</p>
-              )}
-              <p className="pt-2 font-medium">Requested</p>
-              {GOOGLE_SCOPES.split(" ").map((scope) => (
-                <code key={scope} className="block break-all">
-                  {scope}
-                </code>
-              ))}
-            </div>
-          </details>
-
-          {needsReconnect ? (
-            <div className="border-destructive/30 bg-destructive/10 space-y-2 rounded-md border p-3 text-sm">
-              <p className="font-medium">Reconnect needed</p>
-              <p className="text-muted-foreground">
-                {!account?.refresh_token
-                  ? "No refresh token is stored, so sending will stop once the access token expires."
-                  : !canSend
-                    ? "The grant does not allow sending mail."
-                    : "The grant does not allow reading your threads, so replies cannot be detected."}{" "}
-                Sign out and sign back in, accepting every Gmail permission.
-              </p>
-              <SignOutButton />
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              Everything the platform needs is granted.
-            </p>
-          )}
+        <CardContent>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/integrations">
+              <Mail className="size-4" />
+              Manage mailboxes
+            </Link>
+          </Button>
         </CardContent>
       </Card>
 
@@ -157,7 +105,8 @@ export default async function SettingsPage() {
           <ul className="text-muted-foreground list-disc space-y-1.5 pl-5">
             <li>
               <span className="text-foreground font-medium">Daily cap.</span> Each mailbox sends
-              at most {DAILY_SEND_LIMIT} emails per day (<code>DAILY_SEND_LIMIT</code>).
+              at most {DAILY_SEND_LIMIT} emails per day (<code>DAILY_SEND_LIMIT</code>), adjustable
+              per mailbox. Campaigns rotate across several mailboxes to spread the volume.
             </li>
             <li>
               <span className="text-foreground font-medium">Human pacing.</span>{" "}

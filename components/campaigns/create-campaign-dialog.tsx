@@ -1,6 +1,7 @@
 "use client";
 
-import { Plus, Shuffle } from "lucide-react";
+import { Mail, Plus, Shuffle } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -11,6 +12,7 @@ import {
   type CampaignInput,
 } from "@/lib/actions/campaigns";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,12 +33,21 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
-type Props = {
-  templates: { id: string; name: string; subject: string }[];
-  tags: string[];
+export type SenderOption = {
+  id: string;
+  email: string;
+  /** Emails this mailbox may still send today. */
+  remaining: number;
+  limit: number;
 };
 
-export function CreateCampaignDialog({ templates, tags }: Props) {
+type Props = {
+  templates: { id: string; name: string; subject: string }[];
+  /** The current user's active, connected mailboxes. */
+  senders: SenderOption[];
+};
+
+export function CreateCampaignDialog({ templates, senders }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -48,27 +59,38 @@ export function CreateCampaignDialog({ templates, tags }: Props) {
     templateId: templates[0]?.id ?? "",
     audienceSize: 50,
     batchSize: 25,
-    tag: "",
     excludeContacted: true,
     trackOpens: false,
     trackClicks: false,
+    // Rotating across every mailbox is the safest default.
+    senderIds: senders.map((sender) => sender.id),
   });
+
+  const selectedSenders = senders.filter((sender) => values.senderIds.includes(sender.id));
+  const capacityToday = selectedSenders.reduce((total, sender) => total + sender.remaining, 0);
+
+  function toggleSender(id: string, checked: boolean) {
+    setValues((current) => ({
+      ...current,
+      senderIds: checked
+        ? [...current.senderIds, id]
+        : current.senderIds.filter((senderId) => senderId !== id),
+    }));
+  }
 
   // Show the size of the pool the random draw will pick from.
   useEffect(() => {
     if (!open) return;
 
     let cancelled = false;
-    void countEligibleContacts(values.tag || undefined, values.excludeContacted ?? true).then(
-      (count) => {
-        if (!cancelled) setEligible(count);
-      },
-    );
+    void countEligibleContacts(values.excludeContacted ?? true).then((count) => {
+      if (!cancelled) setEligible(count);
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [open, values.tag, values.excludeContacted]);
+  }, [open, values.excludeContacted]);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -101,7 +123,7 @@ export function CreateCampaignDialog({ templates, tags }: Props) {
             <DialogTitle>New campaign</DialogTitle>
             <DialogDescription>
               Pick a template and how many contacts to draw. The audience is sampled at random
-              from everyone who matches.
+              from your active contacts.
             </DialogDescription>
           </DialogHeader>
 
@@ -141,25 +163,50 @@ export function CreateCampaignDialog({ templates, tags }: Props) {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="tag">Audience tag</Label>
-              <Select
-                value={values.tag || "all"}
-                onValueChange={(tag) =>
-                  setValues((current) => ({ ...current, tag: tag === "all" ? "" : tag }))
-                }
-              >
-                <SelectTrigger id="tag">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Every active contact</SelectItem>
-                  {tags.map((tag) => (
-                    <SelectItem key={tag} value={tag}>
-                      {tag}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Send from</Label>
+              {senders.length === 0 ? (
+                <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed p-3 text-sm">
+                  <span>No Gmail mailboxes connected yet.</span>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href="/integrations">
+                      <Mail className="size-4" />
+                      Connect a mailbox
+                    </Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border p-2">
+                  {senders.map((sender) => {
+                    const id = `sender-${sender.id}`;
+                    return (
+                      <label
+                        key={sender.id}
+                        htmlFor={id}
+                        className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5"
+                      >
+                        <Checkbox
+                          id={id}
+                          checked={values.senderIds.includes(sender.id)}
+                          onCheckedChange={(checked) => toggleSender(sender.id, checked === true)}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm">{sender.email}</span>
+                        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                          {sender.remaining}/{sender.limit} left today
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {senders.length > 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  {selectedSenders.length === 0
+                    ? "Pick at least one mailbox."
+                    : `Emails rotate across ${selectedSenders.length} mailbox${
+                        selectedSenders.length === 1 ? "" : "es"
+                      } — up to ${capacityToday} can go out today.`}
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -264,7 +311,10 @@ export function CreateCampaignDialog({ templates, tags }: Props) {
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={pending || !values.templateId}>
+            <Button
+              type="submit"
+              disabled={pending || !values.templateId || values.senderIds.length === 0}
+            >
               {pending ? "Creating…" : "Create campaign"}
             </Button>
           </DialogFooter>

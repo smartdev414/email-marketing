@@ -60,7 +60,6 @@ export function ContactDialog({ contact, trigger, open, onOpenChange }: Props) {
     phone: contact?.phone ?? "",
     country: contact?.country ?? "",
     status: contact?.status ?? "ACTIVE",
-    tags: contact?.tags ?? "",
     notes: contact?.notes ?? "",
   });
 
@@ -167,14 +166,6 @@ export function ContactDialog({ contact, trigger, open, onOpenChange }: Props) {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="tags">Tags</Label>
-              <Input id="tags" placeholder="saas, enterprise" {...field("tags")} />
-              <p className="text-muted-foreground text-xs">
-                Comma separated. Campaigns can target a single tag.
-              </p>
             </div>
 
             <div className="grid gap-2">

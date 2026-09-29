@@ -1,4 +1,5 @@
-import { getGmail } from "@/lib/google";
+import { getGmail, GoogleConnectionError } from "@/lib/google";
+import { prisma } from "@/lib/prisma";
 import { htmlToText } from "@/lib/tracking";
 
 /** RFC 2047 encodes a header value when it contains non-ASCII characters. */
@@ -17,8 +18,8 @@ function base64Url(input: string) {
 }
 
 type SendOptions = {
-  /** Team member whose mailbox sends the email. */
-  userId: string;
+  /** Connected mailbox (`EmailAccount.id`) the email goes out from. */
+  emailAccountId: string;
   fromName?: string | null;
   to: string;
   subject: string;
@@ -36,7 +37,7 @@ export type SendResult = {
 };
 
 export async function sendEmail({
-  userId,
+  emailAccountId,
   fromName,
   to,
   subject,
@@ -45,9 +46,14 @@ export async function sendEmail({
   inReplyTo,
   unsubscribeUrl,
 }: SendOptions): Promise<SendResult> {
-  const gmail = await getGmail(userId);
-  const profile = await gmail.users.getProfile({ userId: "me" });
-  const fromAddress = profile.data.emailAddress;
+  const mailbox = await prisma.emailAccount.findUnique({
+    where: { id: emailAccountId },
+    select: { email: true },
+  });
+  if (!mailbox) throw new GoogleConnectionError();
+
+  const gmail = await getGmail(emailAccountId);
+  const fromAddress = mailbox.email;
 
   const boundary = `bnd_${Math.random().toString(36).slice(2)}`;
   const headers = [
@@ -118,10 +124,10 @@ function headerValue(
  * anything we sent ourselves.
  */
 export async function fetchThreadReplies(
-  userId: string,
+  emailAccountId: string,
   threadId: string,
 ): Promise<ThreadReply[]> {
-  const gmail = await getGmail(userId);
+  const gmail = await getGmail(emailAccountId);
 
   const thread = await gmail.users.threads.get({
     userId: "me",
@@ -154,8 +160,8 @@ const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
  * so we look for mailer-daemon mail and pull the failed recipient out of the
  * `X-Failed-Recipients` header (or the snippet as a fallback).
  */
-export async function fetchBouncedAddresses(userId: string, days = 14) {
-  const gmail = await getGmail(userId);
+export async function fetchBouncedAddresses(emailAccountId: string, days = 14) {
+  const gmail = await getGmail(emailAccountId);
 
   const list = await gmail.users.messages.list({
     userId: "me",

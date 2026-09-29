@@ -36,6 +36,38 @@ model User {
   campaigns   Campaign[]
   automations Automation[]
   assigned    CampaignRecipient[]
+  mailboxes   EmailAccount[]
+}
+
+/// A Gmail mailbox a team member has connected for sending. Separate from the
+/// Auth.js `Account` used to sign in, so one person can connect several
+/// mailboxes and campaigns can rotate between them.
+model EmailAccount {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String   @default("google")
+  email        String
+  /// Display name used in the From header; falls back to the owner's name.
+  fromName     String?
+  accessToken  String?  @db.Text
+  refreshToken String?  @db.Text
+  /// Unix seconds, same convention as `Account.expires_at`.
+  expiresAt    Int?
+  scope        String?
+  /// Paused mailboxes are skipped by every campaign that uses them.
+  isActive     Boolean  @default(true)
+  /// Per-mailbox override of DAILY_SEND_LIMIT, handy while warming a new inbox.
+  dailyLimit   Int?
+  lastError    String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns  Campaign[]          @relation("CampaignSenders")
+  recipients CampaignRecipient[]
+
+  @@unique([userId, email])
+  @@index([userId])
 }
 
 model Account {
@@ -248,6 +280,8 @@ model Campaign {
 
   template   Template            @relation(fields: [templateId], references: [id])
   fromUser   User                @relation(fields: [fromUserId], references: [id])
+  /// Mailboxes this campaign rotates through, spreading volume across inboxes.
+  senders    EmailAccount[]      @relation("CampaignSenders")
   recipients CampaignRecipient[]
 
   @@index([status])
@@ -269,6 +303,9 @@ model CampaignRecipient {
   contactId  String
   /// Team member whose mailbox the email goes out from, and where replies land.
   assignedToId String?
+  /// Mailbox the email actually went out from. Set at send time; follow-ups,
+  /// replies and reply detection all have to use this same mailbox.
+  emailAccountId String?
 
   status RecipientStatus @default(PENDING)
 
@@ -294,7 +331,8 @@ model CampaignRecipient {
 
   campaign   Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   contact    Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  assignedTo User?           @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedTo   User?         @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  emailAccount EmailAccount? @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
   events     EmailEvent[]
   runs       AutomationRun[]
 
@@ -302,6 +340,7 @@ model CampaignRecipient {
   @@index([status])
   @@index([gmailThreadId])
   @@index([assignedToId])
+  @@index([emailAccountId, sentAt])
 }
 
 enum EmailEventType {

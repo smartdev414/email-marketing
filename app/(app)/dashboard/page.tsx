@@ -45,14 +45,14 @@ export default async function DashboardPage() {
         <Card className="border-amber-500/30 bg-amber-500/5 mb-6">
           <CardContent className="flex flex-wrap items-center justify-between gap-3">
             <div className="space-y-1">
-              <p className="text-sm font-medium">Gmail is not connected yet</p>
+              <p className="text-sm font-medium">No sending mailbox connected</p>
               <p className="text-muted-foreground text-sm">
-                Sign out and sign back in with Google, accepting the Gmail permissions, before
-                you send a campaign.
+                Connect one or more Gmail accounts before you send a campaign. Campaigns rotate
+                between them to keep each inbox&rsquo;s volume low.
               </p>
             </div>
             <Button variant="outline" asChild>
-              <Link href="/settings">Open settings</Link>
+              <Link href="/integrations">Open integrations</Link>
             </Button>
           </CardContent>
         </Card>

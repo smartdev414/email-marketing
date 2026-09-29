@@ -25,11 +25,4 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS hl_contacts_sendable_idx
   ON "hl_contacts" ("id")
   WHERE "email" IS NOT NULL AND "email" <> '' AND ("is_spam" IS NULL OR "is_spam" = false);
 
--- Trigram index so `tags ILIKE '%...%'` filtering does not scan the table.
--- Requires the pg_trgm extension (available on Neon, RDS and plain Postgres).
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS hl_contacts_tags_trgm_idx
-  ON "hl_contacts" USING gin ("tags" gin_trgm_ops);
-
 ANALYZE "hl_contacts";
