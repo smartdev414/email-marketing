@@ -1,0 +1,15 @@
+# The Vercel CLI does NOT honour .gitignore when uploading source, so local env
+# files must be excluded here explicitly. Without this, `vercel deploy` ships
+# .env into the deployment — leaking secrets and letting a local AUTH_URL
+# override the production one at runtime.
+.env
+.env.*
+
+# Rebuilt or reinstalled on Vercel
+node_modules
+.next
+lib/generated
+
+# Local tooling, never needed by a build
+.claude
+.vercel

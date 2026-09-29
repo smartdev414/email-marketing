@@ -1,0 +1,385 @@
+// Email Marketing Platform — database schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Team members (Auth.js / Google OAuth)
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(MEMBER)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts    Account[]
+  sessions    Session[]
+  templates   Template[]
+  campaigns   Campaign[]
+  automations Automation[]
+  assigned    CampaignRecipient[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Contacts — the people we email
+// ---------------------------------------------------------------------------
+
+enum ContactStatus {
+  ACTIVE
+  REPLIED
+  BOUNCED
+  UNSUBSCRIBED
+  DO_NOT_CONTACT
+}
+
+/// Raw lead warehouse — the GoHighLevel `hl_contacts` export, loaded straight
+/// from the SQL dump. Column names and types match the dump exactly so its
+/// INSERT statements run unchanged. The app only ever reads from here; campaign
+/// audiences are drawn out of it into `Contact`.
+model HlContact {
+  id             BigInt    @id
+  businessId     Int?      @map("business_id")
+  contactid      String?
+  fullName       String?   @map("full_name")
+  email          String?
+  phone          String?
+  tag            String?
+  note           String?
+  campaign       String?
+  utmMedium      String?   @map("utm_medium")
+  utmContent     String?   @map("utm_content")
+  createdat      DateTime? @db.Timestamptz
+  utmTerm        String?   @map("utm_term")
+  lastsubdate    DateTime? @db.Timestamptz
+  dateupdated    DateTime? @db.Timestamptz
+  url            String?
+  funnelId       String?   @map("funnel_id")
+  pageId         String?   @map("page_id")
+  stepId         String?   @map("step_id")
+  utmSource      String?   @map("utm_source")
+  dateClosed     DateTime? @map("date_closed") @db.Timestamptz
+  selfAppDate    DateTime? @map("self_app_date") @db.Timestamptz
+  appDate        DateTime? @map("app_date") @db.Timestamptz
+  calendarType   String?   @map("calendar_type")
+  appCampaign    String?   @map("app_campaign")
+  appUtmMedium   String?   @map("app_utm_medium")
+  appUtmContent  String?   @map("app_utm_content")
+  formid         String?
+  calendarid     String?
+  campaignId     String?   @map("campaign_id")
+  adId           String?   @map("ad_id")
+  isSpam         Boolean?  @map("is_spam")
+  tenantId       Int?      @map("tenant_id")
+  notes          String?
+  tags           String?
+  address1       String?
+  city           String?
+  state          String?
+  postalCode     String?   @map("postal_code")
+  country        String?
+  emailHash      String?   @map("email_hash")
+  phoneHash      String?   @map("phone_hash")
+  adPlatform     String?   @map("ad_platform")
+  firstUrl       String?   @map("first_url")
+  crmProvider    String?   @map("crm_provider")
+  matchMethod    String?   @map("match_method")
+  fbclid         String?
+  fbc            String?
+  fbp            String?
+  emailNorm      String?   @map("email_norm")
+  phoneNorm      String?   @map("phone_norm")
+  identityNormAt DateTime? @map("identity_norm_at") @db.Timestamptz
+  leadSource     String?   @map("lead_source")
+  leadSources    String?   @map("lead_sources")
+
+  @@map("hl_contacts")
+}
+
+model Contact {
+  id        String        @id @default(cuid())
+  email     String        @unique
+  firstName String?
+  lastName  String?
+  company   String?
+  jobTitle  String?
+  phone     String?
+  country   String?
+  status    ContactStatus @default(ACTIVE)
+  tags      String[]      @default([])
+  notes     String?       @db.Text
+  source    String?
+  /// `hl_contacts.id` this contact was drawn from, when it came from the warehouse.
+  sourceId  BigInt?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  recipients CampaignRecipient[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([company])
+  @@index([sourceId])
+}
+
+enum SuppressionType {
+  EMAIL
+  DOMAIN
+}
+
+/// Hard block list. Checked on import and again immediately before every send,
+/// so an unsubscribe or bounce can never be undone by a later CSV import.
+model Suppression {
+  id        String          @id @default(cuid())
+  type      SuppressionType
+  value     String
+  reason    String?
+  createdAt DateTime        @default(now())
+
+  @@unique([type, value])
+}
+
+// ---------------------------------------------------------------------------
+// Templates
+// ---------------------------------------------------------------------------
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  body        String   @db.Text
+  description String?
+  isArchived  Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  campaigns   Campaign[]
+  automations Automation[]
+
+  @@index([isArchived])
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  DRAFT
+  SENDING
+  PAUSED
+  COMPLETED
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  status      CampaignStatus @default(DRAFT)
+  templateId  String
+  fromUserId  String
+  /// Max emails released per send run, keeps things under Gmail's daily limits.
+  batchSize   Int            @default(50)
+  /// Open pixels and rewritten links are spam signals on cold outreach, so
+  /// each campaign can turn them off and rely on replies alone.
+  trackOpens  Boolean        @default(true)
+  trackClicks Boolean        @default(true)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  template   Template            @relation(fields: [templateId], references: [id])
+  fromUser   User                @relation(fields: [fromUserId], references: [id])
+  recipients CampaignRecipient[]
+
+  @@index([status])
+  @@index([fromUserId])
+}
+
+enum RecipientStatus {
+  PENDING
+  SENT
+  OPENED
+  REPLIED
+  BOUNCED
+  FAILED
+}
+
+model CampaignRecipient {
+  id         String @id @default(cuid())
+  campaignId String
+  contactId  String
+  /// Team member whose mailbox the email goes out from, and where replies land.
+  assignedToId String?
+
+  status RecipientStatus @default(PENDING)
+
+  /// Opaque token embedded in the tracking pixel and tracked links.
+  trackingToken String @unique @default(cuid())
+
+  gmailMessageId String?
+  gmailThreadId  String?
+  subject        String?
+
+  sentAt         DateTime?
+  firstOpenedAt  DateTime?
+  lastOpenedAt   DateTime?
+  openCount      Int       @default(0)
+  firstClickedAt DateTime?
+  clickCount     Int       @default(0)
+  repliedAt      DateTime?
+  bouncedAt      DateTime?
+  error          String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign   Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact    Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedTo User?           @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  events     EmailEvent[]
+  runs       AutomationRun[]
+
+  @@unique([campaignId, contactId])
+  @@index([status])
+  @@index([gmailThreadId])
+  @@index([assignedToId])
+}
+
+enum EmailEventType {
+  SENT
+  OPEN
+  CLICK
+  REPLY
+  BOUNCE
+  UNSUBSCRIBE
+}
+
+model EmailEvent {
+  id          String         @id @default(cuid())
+  recipientId String
+  type        EmailEventType
+  userAgent   String?
+  ipAddress   String?
+  url         String?
+  createdAt   DateTime       @default(now())
+
+  recipient CampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId])
+  @@index([type, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Automations — simple "if this, then send that" follow-up rules
+// ---------------------------------------------------------------------------
+
+enum AutomationTrigger {
+  /// No reply N days after the email was sent.
+  NO_REPLY_AFTER_DAYS
+  /// Opened the email but never replied, N days later.
+  OPENED_NO_REPLY
+  /// Always follow up N days after sending.
+  AFTER_SEND
+}
+
+model Automation {
+  id          String            @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean           @default(false)
+  trigger     AutomationTrigger
+  /// Days to wait before the follow-up fires.
+  delayDays   Int               @default(3)
+  /// Follow-up email sent when the trigger matches.
+  templateId  String
+  createdById String?
+  lastRunAt   DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  template  Template        @relation(fields: [templateId], references: [id])
+  createdBy User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  runs      AutomationRun[]
+
+  @@index([isActive])
+}
+
+enum AutomationRunStatus {
+  SENT
+  SKIPPED
+  FAILED
+}
+
+model AutomationRun {
+  id           String              @id @default(cuid())
+  automationId String
+  recipientId  String
+  status       AutomationRunStatus
+  error        String?
+  createdAt    DateTime            @default(now())
+
+  automation Automation        @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  recipient  CampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, recipientId])
+  @@index([automationId])
+}
