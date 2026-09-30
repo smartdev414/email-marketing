@@ -86,6 +86,8 @@ export const authConfig = {
         pathname === "/login" ||
         pathname === "/privacy" ||
         pathname === "/terms" ||
+        // Google Search Console ownership file (public/google<token>.html).
+        /^\/google[0-9a-f]+\.html$/.test(pathname) ||
         pathname.startsWith("/api/auth") ||
         pathname.startsWith("/api/track") ||
         pathname.startsWith("/api/cron") ||
