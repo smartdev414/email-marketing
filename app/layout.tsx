@@ -23,6 +23,10 @@ export const metadata: Metadata = {
   },
   description:
     "Send outreach campaigns from your own Gmail, track opens and replies, and manage templates in one place.",
+  // Google Search Console domain ownership, needed for OAuth app verification.
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
