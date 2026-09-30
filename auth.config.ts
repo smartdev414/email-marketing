@@ -82,7 +82,10 @@ export const authConfig = {
       const { pathname } = request.nextUrl;
 
       const isPublic =
+        pathname === "/" ||
         pathname === "/login" ||
+        pathname === "/privacy" ||
+        pathname === "/terms" ||
         pathname.startsWith("/api/auth") ||
         pathname.startsWith("/api/track") ||
         pathname.startsWith("/api/cron") ||
