@@ -66,7 +66,7 @@ export function AppSidebar({ children }: { children?: React.ReactNode }) {
                   <MailCheck className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate font-semibold">Outreach</span>
+                  <span className="truncate font-semibold">Mail Spire</span>
                   <span className="text-muted-foreground truncate text-xs">
                     Sales email platform
                   </span>

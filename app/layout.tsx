@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Outreach — Email Marketing",
-    template: "%s · Outreach",
+    default: "Mail Spire — Email Marketing",
+    template: "%s · Mail Spire",
   },
   description:
     "Send outreach campaigns from your own Gmail, track opens and replies, and manage templates in one place.",

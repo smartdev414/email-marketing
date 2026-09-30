@@ -30,7 +30,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             <MailCheck className="size-5" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Outreach</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Mail Spire</h1>
             <p className="text-muted-foreground text-sm">Email marketing for the sales team</p>
           </div>
         </div>
