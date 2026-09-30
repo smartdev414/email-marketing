@@ -1,8 +1,11 @@
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import { z } from "zod";
 
 import { authConfig, gmailCapabilities } from "@/auth.config";
 import type { Role } from "@/lib/generated/prisma/enums";
+import { verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 
 declare module "next-auth" {
@@ -17,9 +20,39 @@ declare module "next-auth" {
   }
 }
 
+const credentialsSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  password: z.string().min(1),
+});
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   adapter: PrismaAdapter(prisma),
+  providers: [
+    ...authConfig.providers,
+    // Email + password, for anyone who has set a password on the Settings page.
+    // Lives here rather than auth.config.ts because it needs the database.
+    Credentials({
+      credentials: {
+        email: { type: "email" },
+        password: { type: "password" },
+      },
+      async authorize(credentials) {
+        const parsed = credentialsSchema.safeParse(credentials);
+        if (!parsed.success) return null;
+
+        // Emails come from Google, so match case-insensitively.
+        const user = await prisma.user.findFirst({
+          where: { email: { equals: parsed.data.email, mode: "insensitive" } },
+          select: { id: true, name: true, email: true, image: true, isActive: true, passwordHash: true },
+        });
+        if (!user?.isActive) return null;
+        if (!(await verifyPassword(parsed.data.password, user.passwordHash))) return null;
+
+        return { id: user.id, name: user.name, email: user.email, image: user.image };
+      },
+    }),
+  ],
   callbacks: {
     ...authConfig.callbacks,
     async jwt({ token, user }) {

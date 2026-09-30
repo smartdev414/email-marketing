@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     return back({ error: "Could not finish connecting the mailbox. Try again." });
   }
 
-  const { email, tokens } = result;
+  const { email, name, tokens } = result;
   if (!email || !tokens.access_token) {
     return back({ error: "Google did not share the mailbox address." });
   }
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
 
   const existing = await prisma.emailAccount.findUnique({
     where: { userId_email: { userId: session.user.id, email } },
-    select: { refreshToken: true },
+    select: { refreshToken: true, fromName: true },
   });
 
   // Google only sends a refresh token on first consent; keep the old one if
@@ -93,8 +93,9 @@ export async function GET(request: NextRequest) {
 
   await prisma.emailAccount.upsert({
     where: { userId_email: { userId: session.user.id, email } },
-    update: { ...data, isActive: true },
-    create: { ...data, userId: session.user.id, email, provider: "google" },
+    // Send as the Gmail account's own name unless a custom one was set.
+    update: { ...data, isActive: true, fromName: existing?.fromName ?? name },
+    create: { ...data, userId: session.user.id, email, provider: "google", fromName: name },
   });
 
   return back({ connected: email });

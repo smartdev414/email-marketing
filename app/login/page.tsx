@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { GoogleSignInButton } from "@/components/google-sign-in-button";
+import { PasswordSignInForm } from "@/components/password-sign-in-form";
 import { auth } from "@/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -49,6 +50,15 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
               </p>
             ) : null}
             <GoogleSignInButton />
+            <div className="text-muted-foreground flex items-center gap-3 text-xs">
+              <span className="bg-border h-px flex-1" />
+              or
+              <span className="bg-border h-px flex-1" />
+            </div>
+            <PasswordSignInForm />
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Joined with Google? Set a password on the Settings page to sign in with email too.
+            </p>
             <p className="text-muted-foreground text-xs leading-relaxed">
               We ask for permission to send email and read your threads so the platform can
               detect replies. Nothing is sent without you starting a campaign.

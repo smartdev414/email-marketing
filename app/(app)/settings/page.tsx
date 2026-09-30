@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { auth } from "@/auth";
 import { PageHeader } from "@/components/page-header";
+import { PasswordForm } from "@/components/settings/password-form";
 import { SignOutButton } from "@/components/sign-out-button";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,7 @@ export default async function SettingsPage() {
   const session = await auth();
   const userId = session?.user?.id;
 
-  const [mailboxes, suppressions, suppressionCount, team] = await Promise.all([
+  const [mailboxes, suppressions, suppressionCount, team, account] = await Promise.all([
     prisma.emailAccount.findMany({
       where: { userId: userId ?? "" },
       select: { id: true, dailyLimit: true, isActive: true, scope: true, refreshToken: true },
@@ -40,7 +41,9 @@ export default async function SettingsPage() {
       orderBy: { createdAt: "asc" },
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     }),
+    prisma.user.findUnique({ where: { id: userId ?? "" }, select: { passwordHash: true } }),
   ]);
+  const hasPassword = Boolean(account?.passwordHash);
 
   const sending = mailboxes.filter((mailbox) => mailbox.isActive && mailboxReady(mailbox));
   const quotas = await mailboxQuotas(mailboxes);
@@ -91,6 +94,20 @@ export default async function SettingsPage() {
               Manage mailboxes
             </Link>
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-base">Password</CardTitle>
+          <CardDescription>
+            {hasPassword
+              ? "You can sign in with your email and this password, as well as with Google."
+              : "Set a password to sign in with your email as well as with Google."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PasswordForm hasPassword={hasPassword} />
         </CardContent>
       </Card>
 
