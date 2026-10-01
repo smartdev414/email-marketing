@@ -20,7 +20,7 @@ export async function getDashboardStats() {
         take: 5,
         include: {
           template: { select: { name: true } },
-          fromUser: { select: { name: true, email: true } },
+          senders: { select: { email: true }, orderBy: { createdAt: "asc" } },
           _count: { select: { recipients: true } },
         },
       }),

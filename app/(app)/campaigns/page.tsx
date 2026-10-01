@@ -78,7 +78,6 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       orderBy: { createdAt: sort === "oldest" ? "asc" : "desc" },
       include: {
         template: { select: { name: true } },
-        fromUser: { select: { name: true, email: true } },
         senders: { select: { id: true, email: true }, orderBy: { createdAt: "asc" } },
         _count: { select: { recipients: true } },
       },
@@ -261,9 +260,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                               {campaign.template.name} ·{" "}
                               {campaign.senders.length > 1
                                 ? `${campaign.senders.length} mailboxes`
-                                : (campaign.senders[0]?.email ??
-                                  campaign.fromUser.name ??
-                                  campaign.fromUser.email)}
+                                : (campaign.senders[0]?.email ?? "No mailbox")}
                             </p>
                           </TableCell>
                           <TableCell>

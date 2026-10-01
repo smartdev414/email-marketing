@@ -130,8 +130,13 @@ export default async function DashboardPage() {
                     <TableCell className="text-right tabular-nums">
                       {campaign._count.recipients}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {campaign.fromUser.name ?? campaign.fromUser.email}
+                    <TableCell
+                      className="text-muted-foreground text-sm"
+                      title={campaign.senders.map((sender) => sender.email).join("\n")}
+                    >
+                      {campaign.senders.length > 1
+                        ? `${campaign.senders.length} mailboxes`
+                        : (campaign.senders[0]?.email ?? "No mailbox")}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDistanceToNow(campaign.createdAt, { addSuffix: true })}
