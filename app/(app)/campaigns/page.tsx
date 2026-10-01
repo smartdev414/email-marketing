@@ -3,7 +3,11 @@ import { Send } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { CreateCampaignDialog } from "@/components/campaigns/create-campaign-dialog";
+import { CampaignRowActions } from "@/components/campaigns/campaign-row-actions";
+import {
+  CreateCampaignDialog,
+  type SenderOption,
+} from "@/components/campaigns/create-campaign-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { SearchInput } from "@/components/search-input";
@@ -75,7 +79,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       include: {
         template: { select: { name: true } },
         fromUser: { select: { name: true, email: true } },
-        senders: { select: { email: true }, orderBy: { createdAt: "asc" } },
+        senders: { select: { id: true, email: true }, orderBy: { createdAt: "asc" } },
         _count: { select: { recipients: true } },
       },
     }),
@@ -84,10 +88,19 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       orderBy: { name: "asc" },
       select: { id: true, name: true, subject: true },
     }),
+    // Every user's active mailboxes: the create dialog offers the current
+    // user's, and each campaign's Edit dialog offers its owner's.
     prisma.emailAccount.findMany({
-      where: { userId: session?.user?.id ?? "", isActive: true },
+      where: { isActive: true },
       orderBy: { createdAt: "asc" },
-      select: { id: true, email: true, dailyLimit: true, scope: true, refreshToken: true },
+      select: {
+        id: true,
+        userId: true,
+        email: true,
+        dailyLimit: true,
+        scope: true,
+        refreshToken: true,
+      },
     }),
     // Every mailbox some campaign sends from, for the mailbox filter.
     prisma.emailAccount.findMany({
@@ -99,12 +112,17 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
 
   const usable = mailboxes.filter(mailboxReady);
   const quotas = await mailboxQuotas(usable);
-  const senders = usable.map((mailbox) => ({
-    id: mailbox.id,
-    email: mailbox.email,
-    remaining: quotas.get(mailbox.id)?.remaining ?? 0,
-    limit: quotas.get(mailbox.id)?.limit ?? 0,
-  }));
+  const sendersByOwner = new Map<string, SenderOption[]>();
+  for (const mailbox of usable) {
+    const option = {
+      id: mailbox.id,
+      email: mailbox.email,
+      remaining: quotas.get(mailbox.id)?.remaining ?? 0,
+      limit: quotas.get(mailbox.id)?.limit ?? 0,
+    };
+    sendersByOwner.set(mailbox.userId, [...(sendersByOwner.get(mailbox.userId) ?? []), option]);
+  }
+  const senders = sendersByOwner.get(session?.user?.id ?? "") ?? [];
 
   // Per-campaign counters in one grouped query rather than N round-trips.
   // Counting a nullable column counts its non-null rows, which is exactly
@@ -218,6 +236,9 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       <TableHead className="text-right">Opens</TableHead>
                       <TableHead className="text-right">Replies</TableHead>
                       <TableHead>Created</TableHead>
+                      <TableHead className="w-12">
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -266,6 +287,23 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                           </TableCell>
                           <TableCell className="text-muted-foreground text-sm">
                             {formatDistanceToNow(campaign.createdAt, { addSuffix: true })}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <CampaignRowActions
+                              campaign={{
+                                id: campaign.id,
+                                status: campaign.status,
+                                name: campaign.name,
+                                templateId: campaign.templateId,
+                                templateName: campaign.template.name,
+                                batchSize: campaign.batchSize,
+                                trackOpens: campaign.trackOpens,
+                                trackClicks: campaign.trackClicks,
+                                senderIds: campaign.senders.map((sender) => sender.id),
+                              }}
+                              templates={templates}
+                              senders={sendersByOwner.get(campaign.fromUserId) ?? []}
+                            />
                           </TableCell>
                         </TableRow>
                       );

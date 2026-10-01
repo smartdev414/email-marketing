@@ -51,10 +51,27 @@ export async function countEligibleContacts(excludeContacted = true) {
 }
 
 /**
- * Creates a campaign and draws its audience at random. `ORDER BY random()` runs
- * the sampling inside Postgres so we never pull the whole contact table into
- * the app.
+ * Draws an audience at random. `ORDER BY random()` runs the sampling inside
+ * Postgres so we never pull the whole contact table into the app.
  */
+async function drawAudience(audienceSize: number, excludeContacted: boolean) {
+  const conditions = [Prisma.sql`c."status" = 'ACTIVE'`];
+  if (excludeContacted) {
+    conditions.push(
+      Prisma.sql`NOT EXISTS (SELECT 1 FROM "CampaignRecipient" r WHERE r."contactId" = c."id")`,
+    );
+  }
+
+  return prisma.$queryRaw<{ id: string }[]>`
+    SELECT c."id"
+    FROM "Contact" c
+    WHERE ${Prisma.join(conditions, " AND ")}
+    ORDER BY random()
+    LIMIT ${audienceSize}
+  `;
+}
+
+/** Creates a campaign and draws its audience at random. */
 export async function createCampaign(input: CampaignInput): Promise<
   { ok: true; id: string; picked: number } | { ok: false; error: string }
 > {
@@ -91,20 +108,7 @@ export async function createCampaign(input: CampaignInput): Promise<
   const template = await prisma.template.findUnique({ where: { id: templateId } });
   if (!template) return { ok: false, error: "Template not found" };
 
-  const conditions = [Prisma.sql`c."status" = 'ACTIVE'`];
-  if (excludeContacted) {
-    conditions.push(
-      Prisma.sql`NOT EXISTS (SELECT 1 FROM "CampaignRecipient" r WHERE r."contactId" = c."id")`,
-    );
-  }
-
-  const picked = await prisma.$queryRaw<{ id: string }[]>`
-    SELECT c."id"
-    FROM "Contact" c
-    WHERE ${Prisma.join(conditions, " AND ")}
-    ORDER BY random()
-    LIMIT ${audienceSize}
-  `;
+  const picked = await drawAudience(audienceSize, excludeContacted);
 
   if (picked.length === 0) {
     return { ok: false, error: "No contacts match that audience — import contacts first." };
@@ -132,6 +136,118 @@ export async function createCampaign(input: CampaignInput): Promise<
 
   revalidatePath("/campaigns");
   return { ok: true, id: campaign.id, picked: picked.length };
+}
+
+const campaignUpdateSchema = campaignSchema.pick({
+  name: true,
+  templateId: true,
+  batchSize: true,
+  trackOpens: true,
+  trackClicks: true,
+  senderIds: true,
+});
+
+export type CampaignUpdateInput = z.input<typeof campaignUpdateSchema>;
+
+/**
+ * Edits a campaign's settings. The audience is fixed once drawn; template,
+ * mailbox and batch changes apply to the emails that have not gone out yet.
+ */
+export async function updateCampaign(
+  id: string,
+  input: CampaignUpdateInput,
+): Promise<ActionResult> {
+  await requireUser();
+
+  const parsed = campaignUpdateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid campaign" };
+  }
+  const { senderIds, ...fields } = parsed.data;
+
+  const campaign = await prisma.campaign.findUnique({
+    where: { id },
+    select: { fromUserId: true },
+  });
+  if (!campaign) return { ok: false, error: "Campaign not found" };
+
+  // Same rule as creation: replies land in the owner's own mailboxes.
+  const senders = await prisma.emailAccount.findMany({
+    where: { id: { in: senderIds }, userId: campaign.fromUserId, isActive: true },
+    select: { id: true, scope: true, refreshToken: true },
+  });
+  const usable = senders.filter(mailboxReady);
+  if (usable.length === 0) {
+    return { ok: false, error: "None of the selected mailboxes can send — reconnect them first." };
+  }
+
+  const template = await prisma.template.findUnique({ where: { id: fields.templateId } });
+  if (!template) return { ok: false, error: "Template not found" };
+
+  await prisma.campaign.update({
+    where: { id },
+    data: {
+      ...fields,
+      senders: { set: usable.map((sender) => ({ id: sender.id })) },
+    },
+  });
+
+  revalidatePath(`/campaigns/${id}`);
+  revalidatePath("/campaigns");
+  return { ok: true };
+}
+
+/**
+ * Copies a campaign's settings into a new draft with a fresh audience of the
+ * same size. Contacts anyone has already emailed are skipped, so a duplicate
+ * never sends the same people the same email twice.
+ */
+export async function duplicateCampaign(
+  id: string,
+): Promise<{ ok: true; id: string; picked: number } | { ok: false; error: string }> {
+  await requireUser();
+
+  const source = await prisma.campaign.findUnique({
+    where: { id },
+    include: {
+      senders: { select: { id: true, isActive: true, scope: true, refreshToken: true } },
+      _count: { select: { recipients: true } },
+    },
+  });
+  if (!source) return { ok: false, error: "Campaign not found" };
+
+  const usable = source.senders.filter((sender) => sender.isActive && mailboxReady(sender));
+  if (usable.length === 0) {
+    return { ok: false, error: "None of this campaign's mailboxes can send — reconnect them first." };
+  }
+
+  const picked = await drawAudience(Math.max(1, source._count.recipients), true);
+  if (picked.length === 0) {
+    return { ok: false, error: "Every active contact has already been emailed — import more first." };
+  }
+
+  const copy = await prisma.campaign.create({
+    data: {
+      name: `${source.name} (copy)`.slice(0, 120),
+      description: source.description,
+      templateId: source.templateId,
+      fromUserId: source.fromUserId,
+      batchSize: source.batchSize,
+      trackOpens: source.trackOpens,
+      trackClicks: source.trackClicks,
+      senders: { connect: usable.map((sender) => ({ id: sender.id })) },
+      recipients: {
+        create: picked.map((contact) => ({
+          contactId: contact.id,
+          assignedToId: source.fromUserId,
+        })),
+      },
+    },
+    select: { id: true },
+  });
+
+  revalidatePath("/campaigns");
+  return { ok: true, id: copy.id, picked: picked.length };
 }
 
 export async function deleteCampaign(id: string): Promise<ActionResult> {
