@@ -50,7 +50,8 @@ Open <http://localhost:3000> and sign in with Google.
 | `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAIN` | Sign-in allowlist. Leave blank to allow any Google account. |
 | `DAILY_SEND_LIMIT` | Per-mailbox daily cap. Default `50`. |
 | `MIN_SEND_GAP_MS` / `MAX_SEND_GAP_MS` | Randomised pause between sends. |
-| `CRON_SECRET` | Bearer token for `/api/cron/automations`. |
+| `CRON_SECRET` | Bearer token for `/api/cron/automations` and `/api/cron/campaigns`. |
+| `CRON_SENDS_PER_RUN` | Emails each campaign releases per background run. Default `5`. |
 
 ---
 
@@ -193,6 +194,19 @@ that exist. So:
   the only way to see actual inbox placement.
 
 Replies are the metric to trust.
+
+---
+
+## Background sending
+
+Once a campaign is started (first "Send next batch" click, or Resume), it keeps
+sending on its own: `/api/cron/campaigns` releases `CRON_SENDS_PER_RUN` emails
+per sending campaign on every call, still bounded by each mailbox's daily limit.
+Pause the campaign to stop it.
+
+`.github/workflows/campaign-sender.yml` calls the endpoint every 10 minutes
+(Vercel Hobby only allows daily crons). Add two repository secrets for it:
+`APP_URL` (the production origin) and `CRON_SECRET` (same value as on Vercel).
 
 ---
 

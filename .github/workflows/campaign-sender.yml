@@ -1,0 +1,30 @@
+# Drives the background campaign sender. Vercel Hobby only allows daily crons,
+# so GitHub's scheduler calls the endpoint instead.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   APP_URL      e.g. https://your-app.vercel.app (no trailing slash)
+#   CRON_SECRET  same value as the CRON_SECRET env var on Vercel
+name: Campaign sender
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: campaign-sender
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Send next batches
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 320 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/campaigns"

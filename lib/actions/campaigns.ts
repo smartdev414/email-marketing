@@ -4,14 +4,17 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireUser } from "@/auth";
-import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
-import { isSuppressed, mailboxQuotas, suppress } from "@/lib/suppression";
+import {
+  SEND_BUDGET_MS,
+  sendCampaignBatch as sendBatch,
+  type SendSummary,
+} from "@/lib/campaign-sender";
+import { suppress } from "@/lib/suppression";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { GoogleConnectionError, isRevokedGrant, mailboxReady } from "@/lib/google";
 import { fetchBouncedAddresses, fetchThreadReplies, sendEmail } from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
-import { buildVariables, renderTemplate } from "@/lib/template";
-import { oneClickUnsubscribeUrl, textToHtml, withTracking } from "@/lib/tracking";
+import { textToHtml } from "@/lib/tracking";
 
 import type { ActionResult } from "./contacts";
 
@@ -153,255 +156,15 @@ export async function setCampaignPaused(id: string, paused: boolean): Promise<Ac
   return { ok: true };
 }
 
-export type SendSummary =
-  | {
-      ok: true;
-      sent: number;
-      failed: number;
-      skipped: number;
-      remaining: number;
-      quotaReached: boolean;
-      warning?: string;
-    }
-  | { ok: false; error: string };
-
 /**
  * Releases the next batch of pending emails for a campaign. Called from the
- * campaign page — clicking "Send next batch" repeatedly walks the audience,
- * which keeps each request short and stays inside Gmail's rate limits.
- *
- * Sends rotate round-robin across the campaign's mailboxes, each capped at its
- * own daily limit, so no single inbox carries enough volume to look like spam.
+ * campaign page; the background sender at `/api/cron/campaigns` keeps going
+ * on its own once a campaign is sending.
  */
 export async function sendCampaignBatch(campaignId: string): Promise<SendSummary> {
   await requireUser();
 
-  const campaign = await prisma.campaign.findUnique({
-    where: { id: campaignId },
-    include: {
-      template: true,
-      fromUser: true,
-      senders: {
-        where: { isActive: true },
-        include: { user: { select: { name: true } } },
-        orderBy: { createdAt: "asc" },
-      },
-    },
-  });
-
-  if (!campaign) return { ok: false, error: "Campaign not found" };
-  if (campaign.status === "PAUSED") return { ok: false, error: "Campaign is paused" };
-
-  const ready = campaign.senders.filter(mailboxReady);
-  if (ready.length === 0) {
-    return {
-      ok: false,
-      error: "This campaign has no active, connected mailboxes. Check the Integrations page.",
-    };
-  }
-
-  // Daily cap per mailbox — the single most effective spam-prevention control.
-  const quotas = await mailboxQuotas(ready);
-  const rotation = ready
-    .map((sender) => ({ sender, remaining: quotas.get(sender.id)?.remaining ?? 0 }))
-    .filter((slot) => slot.remaining > 0)
-    // Mailbox with the most room goes first so volume evens out over the day.
-    .sort((a, b) => b.remaining - a.remaining);
-
-  const capacity = rotation.reduce((total, slot) => total + slot.remaining, 0);
-  if (capacity === 0) {
-    return {
-      ok: false,
-      error: "Every mailbox on this campaign hit its daily limit. Sending resumes tomorrow.",
-    };
-  }
-
-  const pending = await prisma.campaignRecipient.findMany({
-    where: { campaignId, status: "PENDING" },
-    include: { contact: true },
-    take: Math.min(campaign.batchSize, capacity),
-    orderBy: { createdAt: "asc" },
-  });
-
-  if (pending.length === 0) {
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: { status: "COMPLETED", completedAt: new Date() },
-    });
-    revalidatePath(`/campaigns/${campaignId}`);
-    return {
-      ok: true,
-      sent: 0,
-      failed: 0,
-      skipped: 0,
-      remaining: 0,
-      quotaReached: false,
-    };
-  }
-
-  if (campaign.status === "DRAFT") {
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: { status: "SENDING", startedAt: new Date() },
-    });
-  }
-
-  let sent = 0;
-  let failed = 0;
-  let skipped = 0;
-  let attempts = 0;
-  let cursor = 0;
-  const brokenMailboxes: string[] = [];
-
-  /** Next mailbox in the rotation that still has room today. */
-  function nextSlot() {
-    for (let step = 0; step < rotation.length; step += 1) {
-      const slot = rotation[(cursor + step) % rotation.length];
-      if (slot.remaining > 0) {
-        cursor = (cursor + step + 1) % rotation.length;
-        return slot;
-      }
-    }
-    return null;
-  }
-
-  for (const recipient of pending) {
-    // Never email someone who opted out between audience selection and send.
-    if (recipient.contact.status !== "ACTIVE") {
-      await prisma.campaignRecipient.update({
-        where: { id: recipient.id },
-        data: { status: "FAILED", error: `Contact is ${recipient.contact.status}` },
-      });
-      skipped += 1;
-      continue;
-    }
-
-    // Address screening + block list, re-checked at send time.
-    const rejection = screenAddress(recipient.contact.email);
-    if (rejection || (await isSuppressed(recipient.contact.email))) {
-      const reason = REJECTION_LABELS[rejection ?? "suppressed"];
-      await prisma.$transaction([
-        prisma.campaignRecipient.update({
-          where: { id: recipient.id },
-          data: { status: "FAILED", error: `Skipped — ${reason}` },
-        }),
-        prisma.contact.update({
-          where: { id: recipient.contactId },
-          data: { status: "DO_NOT_CONTACT" },
-        }),
-      ]);
-      skipped += 1;
-      continue;
-    }
-
-    const slot = nextSlot();
-    if (!slot) break;
-    const { sender } = slot;
-
-    // Human-looking pacing between sends.
-    if (attempts > 0) await sleep(sendDelay());
-    attempts += 1;
-
-    const senderName = sender.fromName ?? sender.user.name ?? campaign.fromUser.name;
-    const variables = buildVariables(recipient.contact, senderName);
-    const subject = renderTemplate(campaign.template.subject, variables);
-    const html = withTracking(
-      renderTemplate(textToHtml(campaign.template.body), variables),
-      recipient.trackingToken,
-      { opens: campaign.trackOpens, clicks: campaign.trackClicks },
-    );
-
-    try {
-      const result = await sendEmail({
-        emailAccountId: sender.id,
-        fromName: senderName,
-        to: recipient.contact.email,
-        subject,
-        html,
-        unsubscribeUrl: oneClickUnsubscribeUrl(recipient.trackingToken),
-      });
-
-      slot.remaining -= 1;
-
-      await prisma.$transaction([
-        prisma.campaignRecipient.update({
-          where: { id: recipient.id },
-          data: {
-            status: "SENT",
-            subject,
-            sentAt: new Date(),
-            emailAccountId: sender.id,
-            assignedToId: sender.userId,
-            gmailMessageId: result.messageId,
-            gmailThreadId: result.threadId,
-            error: null,
-          },
-        }),
-        prisma.emailEvent.create({
-          data: { recipientId: recipient.id, type: "SENT" },
-        }),
-      ]);
-
-      sent += 1;
-    } catch (error) {
-      // A dead mailbox is not the recipient's fault: drop the mailbox from the
-      // rotation and leave the recipient queued for the next batch.
-      if (error instanceof GoogleConnectionError || isRevokedGrant(error)) {
-        slot.remaining = 0;
-        brokenMailboxes.push(sender.email);
-        await prisma.emailAccount.update({
-          where: { id: sender.id },
-          data: {
-            lastError: error instanceof Error ? error.message : "Mailbox disconnected",
-          },
-        });
-        continue;
-      }
-
-      const message = error instanceof Error ? error.message : "Unknown send error";
-      await prisma.campaignRecipient.update({
-        where: { id: recipient.id },
-        data: { status: "FAILED", error: message },
-      });
-      failed += 1;
-    }
-  }
-
-  revalidatePath("/integrations");
-
-  if (sent === 0 && brokenMailboxes.length > 0 && rotation.every((slot) => slot.remaining === 0)) {
-    return {
-      ok: false,
-      error: `Could not send from ${brokenMailboxes.join(", ")} — reconnect on the Integrations page.`,
-    };
-  }
-
-  const remaining = await prisma.campaignRecipient.count({
-    where: { campaignId, status: "PENDING" },
-  });
-
-  if (remaining === 0) {
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: { status: "COMPLETED", completedAt: new Date() },
-    });
-  }
-
-  revalidatePath(`/campaigns/${campaignId}`);
-  revalidatePath("/campaigns");
-  revalidatePath("/dashboard");
-
-  return {
-    ok: true,
-    sent,
-    failed,
-    skipped,
-    remaining,
-    quotaReached: rotation.every((slot) => slot.remaining === 0) && remaining > 0,
-    ...(brokenMailboxes.length > 0
-      ? { warning: `Skipped disconnected mailbox: ${brokenMailboxes.join(", ")}` }
-      : {}),
-  };
+  return sendBatch(campaignId, { deadline: Date.now() + SEND_BUDGET_MS });
 }
 
 /**

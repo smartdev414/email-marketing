@@ -277,6 +277,9 @@ model Campaign {
   trackClicks Boolean        @default(true)
   startedAt   DateTime?
   completedAt DateTime?
+  /// Lease held while a batch is going out, so the background sender and a
+  /// manual "Send next batch" never pick up the same recipients twice.
+  sendLockedUntil DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
