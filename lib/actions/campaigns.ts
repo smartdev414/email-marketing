@@ -11,7 +11,7 @@ import {
 } from "@/lib/campaign-sender";
 import { suppress } from "@/lib/suppression";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { GoogleConnectionError, isRevokedGrant, mailboxReady } from "@/lib/google";
+import { GoogleConnectionError, isRevokedGrant, mailboxReady, mailboxSenderName } from "@/lib/google";
 import { fetchBouncedAddresses, fetchThreadReplies, sendEmail } from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
 import { textToHtml } from "@/lib/tracking";
@@ -349,7 +349,7 @@ export async function replyToRecipient(
   recipientId: string,
   body: string,
 ): Promise<ActionResult> {
-  const user = await requireUser();
+  await requireUser();
 
   if (body.trim().length < 2) return { ok: false, error: "Write a reply first" };
 
@@ -371,7 +371,7 @@ export async function replyToRecipient(
   try {
     await sendEmail({
       emailAccountId: recipient.emailAccount.id,
-      fromName: recipient.emailAccount.fromName ?? user.name,
+      fromName: await mailboxSenderName(recipient.emailAccount),
       to: recipient.contact.email,
       subject: recipient.subject ? `Re: ${recipient.subject}` : "Re:",
       html: textToHtml(body),

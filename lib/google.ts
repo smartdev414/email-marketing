@@ -104,6 +104,30 @@ export async function getGmail(emailAccountId: string) {
   return google.gmail({ version: "v1", auth });
 }
 
+/**
+ * The display name a mailbox sends as: its custom From name, else the Gmail
+ * account's own profile name. Mailboxes saved without a name look it up once
+ * and store it, so recipients never see the app user's name instead.
+ */
+export async function mailboxSenderName(mailbox: { id: string; fromName: string | null }) {
+  if (mailbox.fromName) return mailbox.fromName;
+
+  try {
+    const auth = await getOAuthClient(mailbox.id);
+    const profile = await google.oauth2({ version: "v2", auth }).userinfo.get();
+    const name = profile.data.name?.trim() || null;
+
+    if (name) {
+      await prisma.emailAccount.update({ where: { id: mailbox.id }, data: { fromName: name } });
+      mailbox.fromName = name;
+    }
+    return name;
+  } catch (error) {
+    console.error("Could not read the Gmail profile name", error);
+    return null;
+  }
+}
+
 /** True when a stored grant lets us send and read, and can be refreshed. */
 export function mailboxReady(mailbox: { scope: string | null; refreshToken: string | null }) {
   const { canSend, canRead } = gmailCapabilities(mailbox.scope);

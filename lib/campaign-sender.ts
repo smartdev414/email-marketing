@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 
 import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
-import { GoogleConnectionError, isRevokedGrant, mailboxReady } from "@/lib/google";
+import { GoogleConnectionError, isRevokedGrant, mailboxReady, mailboxSenderName } from "@/lib/google";
 import { sendEmail } from "@/lib/mailer";
 import { describeSendWindow, isWithinSendWindow } from "@/lib/send-window";
 import { prisma } from "@/lib/prisma";
@@ -217,7 +217,7 @@ async function sendLockedBatch(
     if (delay > 0) await sleep(delay);
     attempts += 1;
 
-    const senderName = sender.fromName ?? sender.user.name ?? campaign.fromUser.name;
+    const senderName = await mailboxSenderName(sender);
     const variables = buildVariables(recipient.contact, senderName);
     const subject = renderTemplate(campaign.template.subject, variables);
     const html = withTracking(

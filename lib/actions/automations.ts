@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { requireUser } from "@/auth";
 import { screenAddress, sendDelay, sleep } from "@/lib/deliverability";
+import { mailboxSenderName } from "@/lib/google";
 import { isSuppressed } from "@/lib/suppression";
 import { sendEmail } from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
@@ -159,7 +160,7 @@ export async function runAutomations(): Promise<
 
       if (index > 0) await sleep(sendDelay());
 
-      const senderName = mailbox.fromName ?? recipient.assignedTo?.name;
+      const senderName = await mailboxSenderName(mailbox);
       const variables = buildVariables(recipient.contact, senderName);
       const subject = recipient.subject
         ? `Re: ${recipient.subject}`
