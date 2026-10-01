@@ -52,6 +52,7 @@ Open <http://localhost:3000> and sign in with Google.
 | `MIN_SEND_GAP_MS` / `MAX_SEND_GAP_MS` | Randomised pause between sends. |
 | `CRON_SECRET` | Bearer token for `/api/cron/automations` and `/api/cron/campaigns`. |
 | `CRON_SENDS_PER_RUN` | Emails each campaign releases per background run. Default `5`. |
+| `SEND_TIMEZONE` / `SEND_START_HOUR` / `SEND_END_HOUR` / `SEND_DAYS` | Sending window. Default `America/New_York`, `9`–`17`, `1,2,3,4,5` (Mon–Fri). Daily mailbox limits reset at midnight in this zone. |
 
 ---
 
@@ -202,7 +203,8 @@ Replies are the metric to trust.
 Once a campaign is started (first "Send next batch" click, or Resume), it keeps
 sending on its own: `/api/cron/campaigns` releases `CRON_SENDS_PER_RUN` emails
 per sending campaign on every call, still bounded by each mailbox's daily limit.
-Pause the campaign to stop it.
+Pause the campaign to stop it. Nothing — manual or background — goes out
+outside the sending window (weekdays 9:00–17:00 US Eastern by default).
 
 `.github/workflows/campaign-sender.yml` calls the endpoint every 10 minutes
 (Vercel Hobby only allows daily crons). Add two repository secrets for it:
@@ -230,7 +232,7 @@ or the script, if you would rather not expose it:
 
 ## Deployment (Vercel)
 
-Live: **https://email-marketing-platform-azure.vercel.app**
+Live: see the Vercel project's Domains page (the old `email-marketing-platform-azure.vercel.app` alias no longer resolves).
 
 The project is linked to the Vercel project `email-marketing-platform` under the
 `the-agency-engineer` team. `vercel.json` makes each build run

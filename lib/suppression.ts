@@ -1,5 +1,6 @@
 import { DAILY_SEND_LIMIT, emailParts } from "@/lib/deliverability";
 import { prisma } from "@/lib/prisma";
+import { startOfSendDay } from "@/lib/send-window";
 
 /**
  * Database-backed half of the deliverability guardrails. Kept apart from
@@ -38,11 +39,8 @@ export async function suppress(
   });
 }
 
-function startOfToday() {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  return startOfDay;
-}
+/** Quotas reset at midnight in the sending timezone, not the server's. */
+const startOfToday = () => startOfSendDay();
 
 /** How many more emails this mailbox may send today. */
 export async function remainingDailyQuota(emailAccountId: string) {

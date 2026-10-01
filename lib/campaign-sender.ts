@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
 import { GoogleConnectionError, isRevokedGrant, mailboxReady } from "@/lib/google";
 import { sendEmail } from "@/lib/mailer";
+import { describeSendWindow, isWithinSendWindow } from "@/lib/send-window";
 import { prisma } from "@/lib/prisma";
 import { isSuppressed, mailboxQuotas } from "@/lib/suppression";
 import { buildVariables, renderTemplate } from "@/lib/template";
@@ -52,6 +53,10 @@ export async function sendCampaignBatch(
   campaignId: string,
   { deadline, limit }: BatchOptions,
 ): Promise<SendSummary> {
+  if (!isWithinSendWindow()) {
+    return { ok: false, error: `Outside sending hours (${describeSendWindow()}).` };
+  }
+
   const now = new Date();
   const lock = await prisma.campaign.updateMany({
     where: {
@@ -203,6 +208,7 @@ async function sendLockedBatch(
     // Human-looking pacing between sends, as long as the request has time left.
     const delay = attempts > 0 ? sendDelay() : 0;
     if (Date.now() + delay + SEND_HEADROOM_MS > deadline) break;
+    if (!isWithinSendWindow(new Date(Date.now() + delay))) break;
 
     const slot = nextSlot();
     if (!slot) break;
@@ -328,6 +334,10 @@ export type CampaignRunResult = {
  */
 export async function runCampaignSends(budgetMs = SEND_BUDGET_MS) {
   const deadline = Date.now() + budgetMs;
+
+  if (!isWithinSendWindow()) {
+    return { campaigns: 0, processed: 0, sent: 0, results: [], skipped: `outside ${describeSendWindow()}` };
+  }
 
   const campaigns = await prisma.campaign.findMany({
     where: { status: "SENDING" },
