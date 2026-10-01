@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, Play, RefreshCw, Send, Trash2 } from "lucide-react";
+import { Pause, Play, Rocket, RefreshCw, Send, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import {
   deleteCampaign,
   sendCampaignBatch,
   setCampaignPaused,
+  startCampaign,
   syncReplies,
 } from "@/lib/actions/campaigns";
 import {
@@ -35,6 +36,7 @@ export function CampaignControls({ campaignId, status, pending, batchSize }: Pro
   const router = useRouter();
   const [busy, startTransition] = useTransition();
 
+  const isDraft = status === "DRAFT";
   const isPaused = status === "PAUSED";
   const nextBatch = Math.min(pending, batchSize);
 
@@ -84,6 +86,15 @@ export function CampaignControls({ campaignId, status, pending, batchSize }: Pro
     });
   }
 
+  function start() {
+    startTransition(async () => {
+      const result = await startCampaign(campaignId);
+      if (!result.ok) toast.error(result.error);
+      else toast.success("Campaign started — batches go out automatically during sending hours.");
+      router.refresh();
+    });
+  }
+
   function togglePause() {
     startTransition(async () => {
       const result = await setCampaignPaused(campaignId, !isPaused);
@@ -111,14 +122,23 @@ export function CampaignControls({ campaignId, status, pending, batchSize }: Pro
         Check replies
       </Button>
 
-      {pending > 0 ? (
+      {isDraft && pending > 0 ? (
+        <Button onClick={start} disabled={busy}>
+          <Rocket className="size-4" />
+          Start sending
+        </Button>
+      ) : pending > 0 ? (
         <Button variant="outline" onClick={togglePause} disabled={busy}>
           {isPaused ? <Play className="size-4" /> : <Pause className="size-4" />}
           {isPaused ? "Resume" : "Pause"}
         </Button>
       ) : null}
 
-      <Button onClick={send} disabled={busy || pending === 0 || isPaused}>
+      <Button
+        variant={isDraft ? "outline" : "default"}
+        onClick={send}
+        disabled={busy || pending === 0 || isPaused}
+      >
         <Send className="size-4" />
         {pending === 0
           ? "All sent"

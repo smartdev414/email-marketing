@@ -157,6 +157,24 @@ export async function setCampaignPaused(id: string, paused: boolean): Promise<Ac
 }
 
 /**
+ * Hands a draft campaign to the background sender at `/api/cron/campaigns`,
+ * which then releases it in small batches inside the sending window.
+ */
+export async function startCampaign(id: string): Promise<ActionResult> {
+  await requireUser();
+
+  const started = await prisma.campaign.updateMany({
+    where: { id, status: "DRAFT" },
+    data: { status: "SENDING", startedAt: new Date() },
+  });
+  if (started.count === 0) return { ok: false, error: "Only draft campaigns can be started" };
+
+  revalidatePath(`/campaigns/${id}`);
+  revalidatePath("/campaigns");
+  return { ok: true };
+}
+
+/**
  * Releases the next batch of pending emails for a campaign. Called from the
  * campaign page; the background sender at `/api/cron/campaigns` keeps going
  * on its own once a campaign is sending.
