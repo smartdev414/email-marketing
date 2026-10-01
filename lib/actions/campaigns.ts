@@ -14,6 +14,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { GoogleConnectionError, isRevokedGrant, mailboxReady, mailboxSenderName } from "@/lib/google";
 import { fetchBouncedAddresses, fetchThreadReplies, sendEmail } from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
+import { recordReply } from "@/lib/replies";
 import { textToHtml } from "@/lib/tracking";
 
 import type { ActionResult } from "./contacts";
@@ -393,7 +394,6 @@ export async function syncReplies(campaignId?: string): Promise<
     select: {
       id: true,
       gmailThreadId: true,
-      contactId: true,
       emailAccountId: true,
       emailAccount: { select: { email: true } },
     },
@@ -424,23 +424,8 @@ export async function syncReplies(campaignId?: string): Promise<
 
     if (inbound.length === 0) continue;
 
-    const first = inbound[0];
-
-    await prisma.$transaction([
-      prisma.campaignRecipient.update({
-        where: { id: recipient.id },
-        data: { status: "REPLIED", repliedAt: first.receivedAt },
-      }),
-      prisma.emailEvent.create({
-        data: { recipientId: recipient.id, type: "REPLY" },
-      }),
-      prisma.contact.update({
-        where: { id: recipient.contactId },
-        data: { status: "REPLIED" },
-      }),
-    ]);
-
-    replies += 1;
+    // Same path as the background checker, so a manual check also notifies.
+    if (await recordReply(recipient.id, inbound[0])) replies += 1;
   }
 
   if (replies === 0 && lastError) {

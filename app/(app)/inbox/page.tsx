@@ -49,7 +49,7 @@ export default async function InboxPage() {
       ) : (
         <div className="space-y-4">
           {conversations.map((conversation) => (
-            <Card key={conversation.id}>
+            <Card key={conversation.id} id={`reply-${conversation.id}`} className="scroll-mt-20">
               <CardHeader className="flex-row flex-wrap items-start justify-between gap-2 space-y-0">
                 <div className="min-w-0 space-y-1">
                   <CardTitle className="text-base">

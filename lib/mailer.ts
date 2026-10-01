@@ -153,6 +153,32 @@ export async function fetchThreadReplies(
     }));
 }
 
+/**
+ * Thread ids of mail that recently landed in the inbox from someone else. One
+ * list call per mailbox, so the background checker only opens threads that
+ * actually have something new instead of every thread it ever sent.
+ */
+export async function fetchRecentInboxThreadIds(emailAccountId: string, days = 3) {
+  const gmail = await getGmail(emailAccountId);
+  const threadIds = new Set<string>();
+  let pageToken: string | undefined;
+
+  do {
+    const list = await gmail.users.messages.list({
+      userId: "me",
+      q: `in:inbox -from:me newer_than:${days}d`,
+      maxResults: 500,
+      pageToken,
+    });
+    for (const message of list.data.messages ?? []) {
+      if (message.threadId) threadIds.add(message.threadId);
+    }
+    pageToken = list.data.nextPageToken ?? undefined;
+  } while (pageToken && threadIds.size < 2000);
+
+  return threadIds;
+}
+
 const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 
 /**

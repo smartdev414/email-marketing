@@ -11,8 +11,8 @@ import {
   createCampaign,
   type CampaignInput,
 } from "@/lib/actions/campaigns";
+import { SenderPicker } from "@/components/campaigns/sender-picker";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -62,21 +62,9 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
     excludeContacted: true,
     trackOpens: false,
     trackClicks: false,
-    // Rotating across every mailbox is the safest default.
-    senderIds: senders.map((sender) => sender.id),
+    // Nothing pre-ticked: the sender list is a deliberate choice.
+    senderIds: [],
   });
-
-  const selectedSenders = senders.filter((sender) => values.senderIds.includes(sender.id));
-  const capacityToday = selectedSenders.reduce((total, sender) => total + sender.remaining, 0);
-
-  function toggleSender(id: string, checked: boolean) {
-    setValues((current) => ({
-      ...current,
-      senderIds: checked
-        ? [...current.senderIds, id]
-        : current.senderIds.filter((senderId) => senderId !== id),
-    }));
-  }
 
   // Show the size of the pool the random draw will pick from.
   useEffect(() => {
@@ -175,38 +163,13 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
                   </Button>
                 </div>
               ) : (
-                <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border p-2">
-                  {senders.map((sender) => {
-                    const id = `sender-${sender.id}`;
-                    return (
-                      <label
-                        key={sender.id}
-                        htmlFor={id}
-                        className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5"
-                      >
-                        <Checkbox
-                          id={id}
-                          checked={values.senderIds.includes(sender.id)}
-                          onCheckedChange={(checked) => toggleSender(sender.id, checked === true)}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-sm">{sender.email}</span>
-                        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                          {sender.remaining}/{sender.limit} left today
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
+                <SenderPicker
+                  idPrefix="sender"
+                  senders={senders}
+                  value={values.senderIds}
+                  onChange={(senderIds) => setValues((current) => ({ ...current, senderIds }))}
+                />
               )}
-              {senders.length > 0 ? (
-                <p className="text-muted-foreground text-xs">
-                  {selectedSenders.length === 0
-                    ? "Pick at least one mailbox."
-                    : `Emails rotate across ${selectedSenders.length} mailbox${
-                        selectedSenders.length === 1 ? "" : "es"
-                      } — up to ${capacityToday} can go out today.`}
-                </p>
-              ) : null}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

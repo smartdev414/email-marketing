@@ -39,6 +39,9 @@ model User {
   automations Automation[]
   assigned    CampaignRecipient[]
   mailboxes   EmailAccount[]
+
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
 }
 
 /// A Gmail mailbox a team member has connected for sending. Separate from the
@@ -263,25 +266,25 @@ enum CampaignStatus {
 }
 
 model Campaign {
-  id          String         @id @default(cuid())
-  name        String
-  description String?
-  status      CampaignStatus @default(DRAFT)
-  templateId  String
-  fromUserId  String
+  id              String         @id @default(cuid())
+  name            String
+  description     String?
+  status          CampaignStatus @default(DRAFT)
+  templateId      String
+  fromUserId      String
   /// Max emails released per send run, keeps things under Gmail's daily limits.
-  batchSize   Int            @default(50)
+  batchSize       Int            @default(50)
   /// Open pixels and rewritten links are spam signals on cold outreach, so
   /// each campaign can turn them off and rely on replies alone.
-  trackOpens  Boolean        @default(true)
-  trackClicks Boolean        @default(true)
-  startedAt   DateTime?
-  completedAt DateTime?
+  trackOpens      Boolean        @default(true)
+  trackClicks     Boolean        @default(true)
+  startedAt       DateTime?
+  completedAt     DateTime?
   /// Lease held while a batch is going out, so the background sender and a
   /// manual "Send next batch" never pick up the same recipients twice.
   sendLockedUntil DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   template   Template            @relation(fields: [templateId], references: [id])
   fromUser   User                @relation(fields: [fromUserId], references: [id])
@@ -303,11 +306,11 @@ enum RecipientStatus {
 }
 
 model CampaignRecipient {
-  id         String @id @default(cuid())
-  campaignId String
-  contactId  String
+  id             String  @id @default(cuid())
+  campaignId     String
+  contactId      String
   /// Team member whose mailbox the email goes out from, and where replies land.
-  assignedToId String?
+  assignedToId   String?
   /// Mailbox the email actually went out from. Set at send time; follow-ups,
   /// replies and reply detection all have to use this same mailbox.
   emailAccountId String?
@@ -334,12 +337,12 @@ model CampaignRecipient {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  campaign   Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contact    Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  assignedTo   User?         @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
-  emailAccount EmailAccount? @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
-  events     EmailEvent[]
-  runs       AutomationRun[]
+  campaign     Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact      Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedTo   User?           @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  emailAccount EmailAccount?   @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
+  events       EmailEvent[]
+  runs         AutomationRun[]
 
   @@unique([campaignId, contactId])
   @@index([status])
@@ -426,4 +429,50 @@ model AutomationRun {
 
   @@unique([automationId, recipientId])
   @@index([automationId])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  MAILBOX_LIMIT_REACHED
+  CAMPAIGN_OUT_OF_CAPACITY
+  MAILBOX_DISCONNECTED
+  CAMPAIGN_COMPLETED
+  REPLY_RECEIVED
+}
+
+/// Something the background sender wants a person to know about. Shown in the
+/// header bell and, when enabled, pushed to the desktop.
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  /// In-app page the notification opens.
+  url       String?
+  /// Stops the same event being recorded twice, e.g. one limit alert per mailbox per day.
+  dedupeKey String           @unique
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+/// A browser that agreed to receive desktop notifications (Web Push).
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

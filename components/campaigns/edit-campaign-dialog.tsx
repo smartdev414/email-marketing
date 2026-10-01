@@ -6,8 +6,8 @@ import { toast } from "sonner";
 
 import { updateCampaign, type CampaignUpdateInput } from "@/lib/actions/campaigns";
 import type { SenderOption } from "@/components/campaigns/create-campaign-dialog";
+import { SenderPicker } from "@/components/campaigns/sender-picker";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -51,15 +51,6 @@ export function EditCampaignDialog({ campaign, templates, senders, open, onOpenC
   const templateOptions = templates.some((template) => template.id === initial.templateId)
     ? templates
     : [{ id: initial.templateId, name: `${templateName} (archived)` }, ...templates];
-
-  function toggleSender(senderId: string, checked: boolean) {
-    setValues((current) => ({
-      ...current,
-      senderIds: checked
-        ? [...current.senderIds, senderId]
-        : current.senderIds.filter((value) => value !== senderId),
-    }));
-  }
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -128,28 +119,12 @@ export function EditCampaignDialog({ campaign, templates, senders, open, onOpenC
                   No connected mailboxes — reconnect one on the Integrations page.
                 </p>
               ) : (
-                <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border p-2">
-                  {senders.map((sender) => {
-                    const checkboxId = `edit-sender-${id}-${sender.id}`;
-                    return (
-                      <label
-                        key={sender.id}
-                        htmlFor={checkboxId}
-                        className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5"
-                      >
-                        <Checkbox
-                          id={checkboxId}
-                          checked={values.senderIds.includes(sender.id)}
-                          onCheckedChange={(checked) => toggleSender(sender.id, checked === true)}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-sm">{sender.email}</span>
-                        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                          {sender.remaining}/{sender.limit} left today
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
+                <SenderPicker
+                  idPrefix={`edit-sender-${id}`}
+                  senders={senders}
+                  value={values.senderIds}
+                  onChange={(senderIds) => setValues((current) => ({ ...current, senderIds }))}
+                />
               )}
             </div>
 

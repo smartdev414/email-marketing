@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
 import { GoogleConnectionError, isRevokedGrant, mailboxReady, mailboxSenderName } from "@/lib/google";
 import { sendEmail } from "@/lib/mailer";
+import { notify, sendDayKey } from "@/lib/notifications";
 import { describeSendWindow, isWithinSendWindow } from "@/lib/send-window";
 import { prisma } from "@/lib/prisma";
 import { isSuppressed, mailboxQuotas } from "@/lib/suppression";
@@ -113,14 +114,27 @@ async function sendLockedBatch(
 
   // Daily cap per mailbox — the single most effective spam-prevention control.
   const quotas = await mailboxQuotas(ready);
-  const rotation = ready
-    .map((sender) => ({ sender, remaining: quotas.get(sender.id)?.remaining ?? 0 }))
+  const day = sendDayKey();
+  const slots = ready.map((sender) => ({
+    sender,
+    remaining: quotas.get(sender.id)?.remaining ?? 0,
+    limit: quotas.get(sender.id)?.limit ?? 0,
+  }));
+
+  // A mailbox can also run out through replies or another campaign, so check
+  // here too; the dedupe key keeps it to one alert per mailbox per day.
+  for (const slot of slots) {
+    if (slot.remaining <= 0) await notifyLimitReached(slot, day);
+  }
+
+  const rotation = slots
     .filter((slot) => slot.remaining > 0)
     // Mailbox with the most room goes first so volume evens out over the day.
     .sort((a, b) => b.remaining - a.remaining);
 
   const capacity = rotation.reduce((total, slot) => total + slot.remaining, 0);
   if (capacity === 0) {
+    await notifyOutOfCapacity(campaign, day);
     return {
       ok: false,
       error: "Every mailbox on this campaign hit its daily limit. Sending resumes tomorrow.",
@@ -139,6 +153,7 @@ async function sendLockedBatch(
       where: { id: campaignId },
       data: { status: "COMPLETED", completedAt: new Date() },
     });
+    await notifyCompleted(campaign);
     revalidatePath(`/campaigns/${campaignId}`);
     return {
       ok: true,
@@ -237,6 +252,7 @@ async function sendLockedBatch(
       });
 
       slot.remaining -= 1;
+      if (slot.remaining === 0) await notifyLimitReached(slot, day);
 
       await prisma.$transaction([
         prisma.campaignRecipient.update({
@@ -270,6 +286,14 @@ async function sendLockedBatch(
             lastError: error instanceof Error ? error.message : "Mailbox disconnected",
           },
         });
+        await notify({
+          userId: sender.userId,
+          type: "MAILBOX_DISCONNECTED",
+          title: `${sender.email} needs reconnecting`,
+          body: `Gmail rejected it while sending “${campaign.name}”. Reconnect it on the Integrations page.`,
+          url: "/integrations",
+          dedupeKey: `disconnected:${sender.id}:${day}`,
+        });
         continue;
       }
 
@@ -300,7 +324,11 @@ async function sendLockedBatch(
       where: { id: campaignId },
       data: { status: "COMPLETED", completedAt: new Date() },
     });
+    await notifyCompleted(campaign);
   }
+
+  const quotaReached = rotation.every((slot) => slot.remaining === 0) && remaining > 0;
+  if (quotaReached) await notifyOutOfCapacity(campaign, day);
 
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/campaigns");
@@ -312,11 +340,49 @@ async function sendLockedBatch(
     failed,
     skipped,
     remaining,
-    quotaReached: rotation.every((slot) => slot.remaining === 0) && remaining > 0,
+    quotaReached,
     ...(brokenMailboxes.length > 0
       ? { warning: `Skipped disconnected mailbox: ${brokenMailboxes.join(", ")}` }
       : {}),
   };
+}
+
+type CampaignRef = { id: string; name: string; fromUserId: string };
+
+function notifyLimitReached(
+  slot: { sender: { id: string; userId: string; email: string }; limit: number },
+  day: string,
+) {
+  return notify({
+    userId: slot.sender.userId,
+    type: "MAILBOX_LIMIT_REACHED",
+    title: `${slot.sender.email} sent all ${slot.limit} emails`,
+    body: "It hit today's sending limit and picks up again tomorrow.",
+    url: "/integrations",
+    dedupeKey: `limit:${slot.sender.id}:${day}`,
+  });
+}
+
+function notifyOutOfCapacity(campaign: CampaignRef, day: string) {
+  return notify({
+    userId: campaign.fromUserId,
+    type: "CAMPAIGN_OUT_OF_CAPACITY",
+    title: `“${campaign.name}” is done for today`,
+    body: "Every mailbox on this campaign hit its daily limit. Sending resumes tomorrow.",
+    url: `/campaigns/${campaign.id}`,
+    dedupeKey: `capacity:${campaign.id}:${day}`,
+  });
+}
+
+function notifyCompleted(campaign: CampaignRef) {
+  return notify({
+    userId: campaign.fromUserId,
+    type: "CAMPAIGN_COMPLETED",
+    title: `“${campaign.name}” is complete`,
+    body: "Every recipient in the audience has been sent to.",
+    url: `/campaigns/${campaign.id}`,
+    dedupeKey: `completed:${campaign.id}`,
+  });
 }
 
 /** Emails each campaign may release per background run, spreading volume over the day. */
