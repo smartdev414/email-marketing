@@ -5,6 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CampaignControls } from "@/components/campaigns/campaign-controls";
+import { EditCampaignButton } from "@/components/campaigns/edit-campaign-button";
 import { CampaignVariants } from "@/components/campaigns/campaign-variants";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
@@ -22,8 +23,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { aiConfigured } from "@/lib/ai-variants";
+import { mailboxReady } from "@/lib/google";
 import { prisma } from "@/lib/prisma";
 import { getCampaignStats } from "@/lib/stats";
+import { mailboxQuotas } from "@/lib/suppression";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -42,30 +45,51 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
 
   if (!campaign) notFound();
 
-  const [stats, recipients, sentByVariant, repliedByVariant] = await Promise.all([
-    getCampaignStats(id),
-    prisma.campaignRecipient.findMany({
-      where: { campaignId: id },
-      orderBy: [{ sentAt: "desc" }, { createdAt: "asc" }],
-      take: 100,
-      include: {
-        contact: {
-          select: { email: true, firstName: true, lastName: true, company: true },
+  const [stats, recipients, sentByVariant, repliedByVariant, templates, ownerMailboxes] =
+    await Promise.all([
+      getCampaignStats(id),
+      // Every recipient the email actually went out to, newest first.
+      prisma.campaignRecipient.findMany({
+        where: { campaignId: id, sentAt: { not: null } },
+        orderBy: { sentAt: "desc" },
+        include: {
+          contact: {
+            select: { email: true, firstName: true, lastName: true, company: true },
+          },
+          emailAccount: { select: { email: true } },
         },
-        emailAccount: { select: { email: true } },
-      },
-    }),
-    prisma.campaignRecipient.groupBy({
-      by: ["variantId"],
-      where: { campaignId: id, sentAt: { not: null } },
-      _count: { _all: true },
-    }),
-    prisma.campaignRecipient.groupBy({
-      by: ["variantId"],
-      where: { campaignId: id, repliedAt: { not: null } },
-      _count: { _all: true },
-    }),
-  ]);
+      }),
+      prisma.campaignRecipient.groupBy({
+        by: ["variantId"],
+        where: { campaignId: id, sentAt: { not: null } },
+        _count: { _all: true },
+      }),
+      prisma.campaignRecipient.groupBy({
+        by: ["variantId"],
+        where: { campaignId: id, repliedAt: { not: null } },
+        _count: { _all: true },
+      }),
+      prisma.template.findMany({
+        where: { isArchived: false },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      // The Edit dialog offers the campaign owner's mailboxes.
+      prisma.emailAccount.findMany({
+        where: { userId: campaign.fromUserId, isActive: true },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, email: true, dailyLimit: true, scope: true, refreshToken: true },
+      }),
+    ]);
+
+  const usable = ownerMailboxes.filter(mailboxReady);
+  const quotas = await mailboxQuotas(usable);
+  const senders = usable.map((mailbox) => ({
+    id: mailbox.id,
+    email: mailbox.email,
+    remaining: quotas.get(mailbox.id)?.remaining ?? 0,
+    limit: quotas.get(mailbox.id)?.limit ?? 0,
+  }));
 
   /** Sent and reply counts per version; `null` is the template as written. */
   const versionStats = (variantId: string | null) => ({
@@ -88,6 +112,20 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         title={campaign.name}
         description={campaign.description ?? campaign.template.subject}
       >
+        <EditCampaignButton
+          campaign={{
+            id: campaign.id,
+            name: campaign.name,
+            templateId: campaign.templateId,
+            templateName: campaign.template.name,
+            batchSize: campaign.batchSize,
+            trackOpens: campaign.trackOpens,
+            trackClicks: campaign.trackClicks,
+            senderIds: campaign.senders.map((sender) => sender.id),
+          }}
+          templates={templates}
+          senders={senders}
+        />
         <CampaignControls
           campaignId={campaign.id}
           status={campaign.status}
@@ -194,9 +232,12 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle className="text-base">Recipients</CardTitle>
+          <CardTitle className="text-base">Sent recipients</CardTitle>
           <CardDescription>
-            Showing the {Math.min(recipients.length, 100)} most recent.
+            {recipients.length === 0
+              ? "Nothing has gone out yet."
+              : `${recipients.length.toLocaleString()} email${recipients.length === 1 ? "" : "s"} sent, newest first.`}
+            {stats.pending > 0 ? ` ${stats.pending.toLocaleString()} still queued.` : ""}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -247,9 +288,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
                       <span title={format(recipient.sentAt, "PPpp")}>
                         {formatDistanceToNow(recipient.sentAt, { addSuffix: true })}
                       </span>
-                    ) : (
-                      "queued"
-                    )}
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}

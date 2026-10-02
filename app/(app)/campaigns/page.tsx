@@ -44,6 +44,7 @@ const STATUS_FILTERS: { value: "all" | CampaignStatus; label: string }[] = [
 const SORTS = [
   { value: "newest", label: "Newest first" },
   { value: "oldest", label: "Oldest first" },
+  { value: "recent", label: "Last broadcast" },
   { value: "sent", label: "Most sent" },
   { value: "opens", label: "Best open rate" },
   { value: "replies", label: "Most replies" },
@@ -125,13 +126,16 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
 
   // Per-campaign counters in one grouped query rather than N round-trips.
   // Counting a nullable column counts its non-null rows, which is exactly
-  // "how many were sent / opened / replied".
+  // "how many were sent / opened / replied". The latest sentAt is the
+  // campaign's last broadcast.
   const grouped = await prisma.campaignRecipient.groupBy({
     by: ["campaignId"],
     _count: { _all: true, sentAt: true, firstOpenedAt: true, repliedAt: true },
+    _max: { sentAt: true },
   });
 
   const counts = new Map(grouped.map((row) => [row.campaignId, row._count]));
+  const lastSent = new Map(grouped.map((row) => [row.campaignId, row._max.sentAt]));
 
   // Result-based sorts need the counters above, so they happen here.
   const stat = (id: string) => {
@@ -146,6 +150,10 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
   if (sort === "sent") campaigns.sort((a, b) => stat(b.id).sent - stat(a.id).sent);
   if (sort === "opens") campaigns.sort((a, b) => stat(b.id).openRate - stat(a.id).openRate);
   if (sort === "replies") campaigns.sort((a, b) => stat(b.id).replies - stat(a.id).replies);
+  if (sort === "recent")
+    campaigns.sort(
+      (a, b) => (lastSent.get(b.id)?.getTime() ?? 0) - (lastSent.get(a.id)?.getTime() ?? 0),
+    );
 
   function statusHref(value: string) {
     const search = new URLSearchParams();
@@ -235,6 +243,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       <TableHead className="text-right">Opens</TableHead>
                       <TableHead className="text-right">Replies</TableHead>
                       <TableHead>Created</TableHead>
+                      <TableHead>Last broadcast</TableHead>
                       <TableHead className="w-12">
                         <span className="sr-only">Actions</span>
                       </TableHead>
@@ -246,6 +255,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       const sent = bucket?.sentAt ?? 0;
                       const opened = bucket?.firstOpenedAt ?? 0;
                       const replied = bucket?.repliedAt ?? 0;
+                      const lastBroadcast = lastSent.get(campaign.id);
 
                       return (
                         // The name link stretches over the whole row, so any
@@ -286,6 +296,11 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                           </TableCell>
                           <TableCell className="text-muted-foreground text-sm">
                             {formatDistanceToNow(campaign.createdAt, { addSuffix: true })}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {lastBroadcast
+                              ? formatDistanceToNow(lastBroadcast, { addSuffix: true })
+                              : "Never"}
                           </TableCell>
                           <TableCell className="relative z-10 text-right">
                             <CampaignRowActions
