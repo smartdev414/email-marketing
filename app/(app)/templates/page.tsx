@@ -7,11 +7,11 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { SearchInput } from "@/components/search-input";
 import { UrlSelect } from "@/components/url-select";
+import { TemplateCard } from "@/components/templates/template-card";
 import { TemplateDialog } from "@/components/templates/template-dialog";
-import { TemplateRowActions } from "@/components/templates/template-row-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent } from "@/components/ui/card";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 
@@ -138,25 +138,17 @@ export default async function TemplatesPage({ searchParams }: PageProps<"/templa
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {templates.map((template) => (
-            <Card key={template.id} className="flex flex-col">
-              <CardHeader className="gap-x-2">
-                <div className="min-w-0 space-y-1">
-                  <CardTitle className="truncate text-base">{template.name}</CardTitle>
-                  <p className="text-muted-foreground truncate text-sm">{template.subject}</p>
-                </div>
-                <CardAction>
-                  <TemplateRowActions
-                    isArchived={template.isArchived}
-                    template={{
-                      id: template.id,
-                      name: template.name,
-                      subject: template.subject,
-                      body: template.body,
-                      description: template.description ?? "",
-                    }}
-                  />
-                </CardAction>
-              </CardHeader>
+            <TemplateCard
+              key={template.id}
+              isArchived={template.isArchived}
+              template={{
+                id: template.id,
+                name: template.name,
+                subject: template.subject,
+                body: template.body,
+                description: template.description ?? "",
+              }}
+            >
               <CardContent className="flex flex-1 flex-col justify-between gap-4">
                 <p className="text-muted-foreground line-clamp-4 text-sm whitespace-pre-line">
                   {template.body}
@@ -174,7 +166,7 @@ export default async function TemplatesPage({ searchParams }: PageProps<"/templa
                   </span>
                 </div>
               </CardContent>
-            </Card>
+            </TemplateCard>
           ))}
         </div>
       )}

@@ -248,11 +248,13 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       const replied = bucket?.repliedAt ?? 0;
 
                       return (
-                        <TableRow key={campaign.id}>
+                        // The name link stretches over the whole row, so any
+                        // click opens the campaign; the actions menu sits above it.
+                        <TableRow key={campaign.id} className="relative cursor-pointer">
                           <TableCell>
                             <Link
                               href={`/campaigns/${campaign.id}`}
-                              className="font-medium hover:underline"
+                              className="font-medium after:absolute after:inset-0 hover:underline focus-visible:outline-none"
                             >
                               {campaign.name}
                             </Link>
@@ -285,7 +287,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                           <TableCell className="text-muted-foreground text-sm">
                             {formatDistanceToNow(campaign.createdAt, { addSuffix: true })}
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="relative z-10 text-right">
                             <CampaignRowActions
                               campaign={{
                                 id: campaign.id,

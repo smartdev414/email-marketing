@@ -159,6 +159,7 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
                   id="body"
                   required
                   rows={11}
+                  className="max-h-[45dvh] overflow-y-auto"
                   placeholder={"Hi {{firstName}},\n\nI noticed {{company}} is…"}
                   value={values.body}
                   onChange={(event) =>
