@@ -64,6 +64,7 @@ export function CampaignVariants({ campaignId, template, variants, aiEnabled, ca
   const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [editing, setEditing] = useState<VariantRow | null>(null);
+  const [viewingTemplate, setViewingTemplate] = useState(false);
   const [deleting, setDeleting] = useState<VariantRow | null>(null);
 
   const activeCount = variants.filter((variant) => variant.isActive).length;
@@ -126,14 +127,21 @@ export function CampaignVariants({ campaignId, template, variants, aiEnabled, ca
           </p>
         ) : null}
 
-        <div className="rounded-lg border p-3">
+        {/* The subject button stretches over the whole card, so any click opens it. */}
+        <div className="hover:bg-muted/50 relative rounded-lg border p-3 transition-colors">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="font-normal">
               Original template
             </Badge>
             <span className="text-muted-foreground text-xs">{statsLine(template)}</span>
           </div>
-          <p className="mt-2 font-medium">{template.subject}</p>
+          <button
+            type="button"
+            className="mt-2 text-left font-medium after:absolute after:inset-0 focus-visible:outline-none"
+            onClick={() => setViewingTemplate(true)}
+          >
+            {template.subject}
+          </button>
         </div>
 
         {variants.length === 0 ? (
@@ -144,13 +152,13 @@ export function CampaignVariants({ campaignId, template, variants, aiEnabled, ca
           variants.map((variant) => (
             <div
               key={variant.id}
-              className={`rounded-lg border p-3 ${variant.isActive ? "" : "opacity-60"}`}
+              className={`hover:bg-muted/50 relative rounded-lg border p-3 transition-colors ${variant.isActive ? "" : "opacity-60"}`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-muted-foreground text-xs">
                   {variant.isActive ? "Active" : "Paused"} · {statsLine(variant)}
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="relative z-10 flex items-center gap-1">
                   <Switch
                     checked={variant.isActive}
                     disabled={busy}
@@ -179,7 +187,13 @@ export function CampaignVariants({ campaignId, template, variants, aiEnabled, ca
                   </Button>
                 </div>
               </div>
-              <p className="mt-2 font-medium">{variant.subject}</p>
+              <button
+                type="button"
+                className="mt-2 block text-left font-medium after:absolute after:inset-0 focus-visible:outline-none"
+                onClick={() => setEditing(variant)}
+              >
+                {variant.subject}
+              </button>
               <p className="text-muted-foreground mt-1 line-clamp-4 text-sm whitespace-pre-line">
                 {variant.body}
               </p>
@@ -205,6 +219,24 @@ export function CampaignVariants({ campaignId, template, variants, aiEnabled, ca
           }}
         />
       ) : null}
+
+      <Dialog open={viewingTemplate} onOpenChange={setViewingTemplate}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Original template</DialogTitle>
+            <DialogDescription>
+              Edit the template itself on the Templates page, or the campaign&apos;s template with
+              Edit above.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="font-medium">{template.subject}</p>
+            <p className="text-muted-foreground max-h-[60vh] overflow-y-auto text-sm whitespace-pre-line">
+              {template.body}
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
         <AlertDialogContent>
