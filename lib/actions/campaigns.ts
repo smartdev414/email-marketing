@@ -168,7 +168,7 @@ export async function updateCampaign(
 
   const campaign = await prisma.campaign.findUnique({
     where: { id },
-    select: { fromUserId: true },
+    select: { fromUserId: true, templateId: true },
   });
   if (!campaign) return { ok: false, error: "Campaign not found" };
 
@@ -190,6 +190,11 @@ export async function updateCampaign(
     data: {
       ...fields,
       senders: { set: usable.map((sender) => ({ id: sender.id })) },
+      // Variations reword the old template, so they stop going out with it.
+      // They are paused rather than deleted to keep their stats.
+      ...(fields.templateId !== campaign.templateId
+        ? { variants: { updateMany: { where: {}, data: { isActive: false } } } }
+        : {}),
     },
   });
 
@@ -212,6 +217,7 @@ export async function duplicateCampaign(
     where: { id },
     include: {
       senders: { select: { id: true, isActive: true, scope: true, refreshToken: true } },
+      variants: { where: { isActive: true }, select: { subject: true, body: true } },
       _count: { select: { recipients: true } },
     },
   });
@@ -237,6 +243,7 @@ export async function duplicateCampaign(
       trackOpens: source.trackOpens,
       trackClicks: source.trackClicks,
       senders: { connect: usable.map((sender) => ({ id: sender.id })) },
+      variants: { create: source.variants },
       recipients: {
         create: picked.map((contact) => ({
           contactId: contact.id,

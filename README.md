@@ -52,6 +52,8 @@ Open <http://localhost:3000> and sign in with Google.
 | `MIN_SEND_GAP_MS` / `MAX_SEND_GAP_MS` | Randomised pause between sends. |
 | `CRON_SECRET` | Bearer token for `/api/cron/automations` and `/api/cron/campaigns`. |
 | `CRON_SENDS_PER_RUN` | Emails each campaign releases per background run. Default `5`. |
+| `OPENAI_API_KEY` | Turns on AI variations on the campaign page. Leave blank to send templates as written. |
+| `OPENAI_MODEL` | Model for AI variations. Default `gpt-5-nano`. |
 | `SEND_TIMEZONE` / `SEND_START_HOUR` / `SEND_END_HOUR` / `SEND_DAYS` | Sending window. Default `America/New_York`, `9`–`17`, `1,2,3,4,5` (Mon–Fri). Daily mailbox limits reset at midnight in this zone. |
 
 ---

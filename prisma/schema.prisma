@@ -291,9 +291,29 @@ model Campaign {
   /// Mailboxes this campaign rotates through, spreading volume across inboxes.
   senders    EmailAccount[]      @relation("CampaignSenders")
   recipients CampaignRecipient[]
+  variants   CampaignVariant[]
 
   @@index([status])
   @@index([fromUserId])
+}
+
+/// AI-written rewording of the campaign's template. The sender rotates the
+/// template and its active variations, so the same text does not go out to
+/// every recipient. Greeting, sign-off, links and {{variables}} stay fixed.
+model CampaignVariant {
+  id         String   @id @default(cuid())
+  campaignId String
+  subject    String
+  body       String   @db.Text
+  /// Paused variations stay for their stats but are not sent.
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  campaign   Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipients CampaignRecipient[]
+
+  @@index([campaignId])
 }
 
 enum RecipientStatus {
@@ -314,6 +334,8 @@ model CampaignRecipient {
   /// Mailbox the email actually went out from. Set at send time; follow-ups,
   /// replies and reply detection all have to use this same mailbox.
   emailAccountId String?
+  /// AI variation the email went out with; null means the template as written.
+  variantId      String?
 
   status RecipientStatus @default(PENDING)
 
@@ -337,10 +359,11 @@ model CampaignRecipient {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  campaign     Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contact      Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  assignedTo   User?           @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
-  emailAccount EmailAccount?   @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
+  campaign     Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact      Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedTo   User?            @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  emailAccount EmailAccount?    @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
+  variant      CampaignVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
   events       EmailEvent[]
   runs         AutomationRun[]
 

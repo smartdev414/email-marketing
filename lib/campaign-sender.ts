@@ -98,6 +98,7 @@ async function sendLockedBatch(
         include: { user: { select: { name: true } } },
         orderBy: { createdAt: "asc" },
       },
+      variants: { where: { isActive: true }, select: { id: true, subject: true, body: true } },
     },
   });
 
@@ -179,6 +180,13 @@ async function sendLockedBatch(
   let cursor = 0;
   const brokenMailboxes: string[] = [];
 
+  // The template plus its active AI variations, picked at random per email so
+  // the same wording does not go to every recipient.
+  const versions = [
+    { id: null, subject: campaign.template.subject, body: campaign.template.body },
+    ...campaign.variants,
+  ];
+
   /** Next mailbox in the rotation that still has room today. */
   function nextSlot() {
     for (let step = 0; step < rotation.length; step += 1) {
@@ -234,9 +242,10 @@ async function sendLockedBatch(
 
     const senderName = await mailboxSenderName(sender);
     const variables = buildVariables(recipient.contact, senderName);
-    const subject = renderTemplate(campaign.template.subject, variables);
+    const version = versions[Math.floor(Math.random() * versions.length)];
+    const subject = renderTemplate(version.subject, variables);
     const html = withTracking(
-      renderTemplate(textToHtml(campaign.template.body), variables),
+      renderTemplate(textToHtml(version.body), variables),
       recipient.trackingToken,
       { opens: campaign.trackOpens, clicks: campaign.trackClicks },
     );
@@ -263,6 +272,7 @@ async function sendLockedBatch(
             sentAt: new Date(),
             emailAccountId: sender.id,
             assignedToId: sender.userId,
+            variantId: version.id,
             gmailMessageId: result.messageId,
             gmailThreadId: result.threadId,
             error: null,

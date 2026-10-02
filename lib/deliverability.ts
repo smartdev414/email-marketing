@@ -103,7 +103,7 @@ export function sleep(ms: number) {
  * Words and patterns that trip spam filters. This is a writing aid shown in the
  * template editor, not a hard gate.
  */
-const SPAM_TERMS = [
+export const SPAM_TERMS = [
   "act now",
   "apply now",
   "buy now",

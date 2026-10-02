@@ -5,6 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CampaignControls } from "@/components/campaigns/campaign-controls";
+import { CampaignVariants } from "@/components/campaigns/campaign-variants";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
@@ -20,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { aiConfigured } from "@/lib/ai-variants";
 import { prisma } from "@/lib/prisma";
 import { getCampaignStats } from "@/lib/stats";
 
@@ -34,12 +36,13 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
       template: true,
       fromUser: { select: { name: true, email: true } },
       senders: { select: { id: true, email: true, isActive: true }, orderBy: { createdAt: "asc" } },
+      variants: { orderBy: { createdAt: "asc" } },
     },
   });
 
   if (!campaign) notFound();
 
-  const [stats, recipients] = await Promise.all([
+  const [stats, recipients, sentByVariant, repliedByVariant] = await Promise.all([
     getCampaignStats(id),
     prisma.campaignRecipient.findMany({
       where: { campaignId: id },
@@ -52,7 +55,23 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         emailAccount: { select: { email: true } },
       },
     }),
+    prisma.campaignRecipient.groupBy({
+      by: ["variantId"],
+      where: { campaignId: id, sentAt: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.campaignRecipient.groupBy({
+      by: ["variantId"],
+      where: { campaignId: id, repliedAt: { not: null } },
+      _count: { _all: true },
+    }),
   ]);
+
+  /** Sent and reply counts per version; `null` is the template as written. */
+  const versionStats = (variantId: string | null) => ({
+    sent: sentByVariant.find((row) => row.variantId === variantId)?._count._all ?? 0,
+    replied: repliedByVariant.find((row) => row.variantId === variantId)?._count._all ?? 0,
+  });
 
   const progress = stats.total === 0 ? 0 : Math.round((stats.sent / stats.total) * 100);
 
@@ -154,6 +173,24 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
           </p>
         </CardContent>
       </Card>
+
+      <CampaignVariants
+        campaignId={campaign.id}
+        template={{
+          subject: campaign.template.subject,
+          body: campaign.template.body,
+          ...versionStats(null),
+        }}
+        variants={campaign.variants.map((variant) => ({
+          id: variant.id,
+          subject: variant.subject,
+          body: variant.body,
+          isActive: variant.isActive,
+          ...versionStats(variant.id),
+        }))}
+        aiEnabled={aiConfigured()}
+        canGenerate={campaign.status !== "COMPLETED"}
+      />
 
       <Card className="mt-6">
         <CardHeader>
