@@ -39,6 +39,15 @@ type Props = {
   trigger?: React.ReactNode;
 };
 
+function initialValues(template?: TemplateFormValues): TemplateInput {
+  return {
+    name: template?.name ?? "",
+    subject: template?.subject ?? "",
+    body: template?.body ?? "",
+    description: template?.description ?? "",
+  };
+}
+
 export function TemplateDialog({ template, open, onOpenChange, trigger }: Props) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -47,12 +56,15 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
   const isOpen = isControlled ? open : internalOpen;
   const setOpen = isControlled ? (onOpenChange ?? (() => {})) : setInternalOpen;
 
-  const [values, setValues] = useState<TemplateInput>({
-    name: template?.name ?? "",
-    subject: template?.subject ?? "",
-    body: template?.body ?? "",
-    description: template?.description ?? "",
-  });
+  const [values, setValues] = useState<TemplateInput>(() => initialValues(template));
+
+  // The dialog stays mounted between uses, so start from a clean form (or the
+  // template's saved values) each time it opens rather than the last draft.
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    if (isOpen) setValues(initialValues(template));
+  }
 
   const warnings = useMemo(
     () => checkContent(values.subject, values.body),
