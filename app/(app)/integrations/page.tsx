@@ -50,7 +50,7 @@ const SORTS = [
 
 type MailboxStatus = "ready" | "paused" | "reconnect" | "disconnected";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 function ConnectButtons({ size }: { size?: "sm" }) {
   // Plain links: the routes redirect off-site to Google's or Microsoft's consent screen.

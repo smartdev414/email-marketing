@@ -43,7 +43,7 @@ const STATUS_FILTERS: { value: "all" | CampaignStatus; label: string }[] = [
   { value: "COMPLETED", label: "Completed" },
 ];
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 const SORTS = [
   { value: "newest", label: "Newest first" },
