@@ -48,7 +48,7 @@ export function SenderPicker({ idPrefix, senders, value, onChange }: Props) {
           <input
             value={term}
             onChange={(event) => setTerm(event.target.value)}
-            placeholder="Search Gmail…"
+            placeholder="Search mailboxes…"
             aria-label="Search mailboxes"
             className="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 h-8 w-full rounded-lg border bg-transparent pr-2 pl-8 text-sm outline-none focus-visible:ring-3"
           />

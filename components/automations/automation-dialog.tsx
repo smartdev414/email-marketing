@@ -92,7 +92,7 @@ export function AutomationDialog({ templates, automation, open, onOpenChange }: 
           <DialogHeader>
             <DialogTitle>{automation?.id ? "Edit automation" : "New automation"}</DialogTitle>
             <DialogDescription>
-              A follow-up rule. It replies inside the original Gmail thread, and each contact
+              A follow-up rule. It replies inside the original email thread, and each contact
               only ever receives it once.
             </DialogDescription>
           </DialogHeader>

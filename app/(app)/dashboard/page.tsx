@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { hasGmailAccess } from "@/lib/google";
+import { hasMailboxAccess } from "@/lib/mailbox";
 import { getDashboardStats } from "@/lib/stats";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -27,7 +27,7 @@ export default async function DashboardPage() {
   const session = await auth();
   const [stats, gmailReady] = await Promise.all([
     getDashboardStats(),
-    session?.user?.id ? hasGmailAccess(session.user.id) : Promise.resolve(false),
+    session?.user?.id ? hasMailboxAccess(session.user.id) : Promise.resolve(false),
   ]);
 
   return (
@@ -47,7 +47,7 @@ export default async function DashboardPage() {
             <div className="space-y-1">
               <p className="text-sm font-medium">No sending mailbox connected</p>
               <p className="text-muted-foreground text-sm">
-                Connect one or more Gmail accounts before you send a campaign. Campaigns rotate
+                Connect one or more Gmail or Outlook accounts before you send a campaign. Campaigns rotate
                 between them to keep each inbox&rsquo;s volume low.
               </p>
             </div>

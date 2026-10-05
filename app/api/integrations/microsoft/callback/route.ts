@@ -4,8 +4,8 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { auth } from "@/auth";
-import { gmailCapabilities } from "@/auth.config";
-import { MAILBOX_STATE_COOKIE, exchangeMailboxCode } from "@/lib/google";
+import { outlookCapabilities } from "@/lib/mailbox";
+import { MICROSOFT_STATE_COOKIE, exchangeMicrosoftCode } from "@/lib/microsoft";
 import { prisma } from "@/lib/prisma";
 import { appUrl } from "@/lib/tracking";
 
@@ -22,7 +22,7 @@ function sameState(a: string, b: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** Google redirects here after the user approves (or declines) a mailbox. */
+/** Microsoft redirects here after the user approves (or declines) a mailbox. */
 export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -31,8 +31,8 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const cookieStore = await cookies();
-  const expected = cookieStore.get(MAILBOX_STATE_COOKIE)?.value;
-  cookieStore.delete({ name: MAILBOX_STATE_COOKIE, path: "/api/integrations/google" });
+  const expected = cookieStore.get(MICROSOFT_STATE_COOKIE)?.value;
+  cookieStore.delete({ name: MICROSOFT_STATE_COOKIE, path: "/api/integrations/microsoft" });
 
   const state = params.get("state");
   if (!expected || !state || !sameState(expected, state)) {
@@ -41,31 +41,36 @@ export async function GET(request: NextRequest) {
 
   const denied = params.get("error");
   if (denied) {
+    const description = params.get("error_description")?.split(/\r?\n/)[0];
     return back({
-      error: denied === "access_denied" ? "Google access was declined." : `Google said: ${denied}`,
+      error:
+        denied === "access_denied"
+          ? "Microsoft access was declined."
+          : // Work tenants that only allow admin-approved apps land here.
+            `Microsoft said: ${description || denied}`,
     });
   }
 
   const code = params.get("code");
-  if (!code) return back({ error: "Google did not return an authorisation code." });
+  if (!code) return back({ error: "Microsoft did not return an authorisation code." });
 
-  let result: Awaited<ReturnType<typeof exchangeMailboxCode>>;
+  let result: Awaited<ReturnType<typeof exchangeMicrosoftCode>>;
   try {
-    result = await exchangeMailboxCode(code);
+    result = await exchangeMicrosoftCode(code);
   } catch (error) {
-    console.error("Mailbox connection failed", error);
+    console.error("Outlook mailbox connection failed", error);
     return back({ error: "Could not finish connecting the mailbox. Try again." });
   }
 
   const { email, name, tokens } = result;
   if (!email || !tokens.access_token) {
-    return back({ error: "Google did not share the mailbox address." });
+    return back({ error: "Microsoft did not share the mailbox address." });
   }
 
-  const { canSend, canRead } = gmailCapabilities(tokens.scope);
+  const { canSend, canRead } = outlookCapabilities(tokens.scope);
   if (!canSend || !canRead) {
     return back({
-      error: `${email} was connected without Gmail access. Reconnect and tick every permission.`,
+      error: `${email} was connected without mail access. Reconnect and accept every permission.`,
     });
   }
 
@@ -74,32 +79,28 @@ export async function GET(request: NextRequest) {
     select: { provider: true, refreshToken: true, fromName: true },
   });
 
-  if (existing && existing.provider !== "google") {
-    return back({ error: `${email} is already connected as an Outlook mailbox.` });
+  if (existing && existing.provider !== "microsoft") {
+    return back({ error: `${email} is already connected as a Gmail mailbox.` });
   }
 
-  // Google only sends a refresh token on first consent; keep the old one if
-  // this is a reconnect that did not include a new one.
   const refreshToken = tokens.refresh_token ?? existing?.refreshToken ?? null;
   if (!refreshToken) {
-    return back({
-      error: `No refresh token for ${email}. Remove the app at myaccount.google.com/permissions and connect again.`,
-    });
+    return back({ error: `Microsoft did not return a refresh token for ${email}. Try again.` });
   }
 
   const data = {
     accessToken: tokens.access_token,
     refreshToken,
-    expiresAt: tokens.expiry_date ? Math.floor(tokens.expiry_date / 1000) : null,
+    expiresAt: Math.floor(Date.now() / 1000) + tokens.expires_in,
     scope: tokens.scope ?? null,
     lastError: null,
   };
 
   await prisma.emailAccount.upsert({
     where: { userId_email: { userId: session.user.id, email } },
-    // Send as the Gmail account's own name unless a custom one was set.
+    // Send as the Microsoft account's own name unless a custom one was set.
     update: { ...data, isActive: true, fromName: existing?.fromName ?? name },
-    create: { ...data, userId: session.user.id, email, provider: "google", fromName: name },
+    create: { ...data, userId: session.user.id, email, provider: "microsoft", fromName: name },
   });
 
   return back({ connected: email });

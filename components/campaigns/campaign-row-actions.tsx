@@ -150,7 +150,7 @@ export function CampaignRowActions({ campaign, templates, senders }: Props) {
             <AlertDialogTitle>Delete “{campaign.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
               The campaign and its tracking history are removed. Emails already sent stay in
-              Gmail, and contacts are not deleted.
+              your mailbox, and contacts are not deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

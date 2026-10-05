@@ -45,6 +45,7 @@ Open <http://localhost:3000> and sign in with Google.
 | `AUTH_SECRET` | Generate with `npx auth secret`. |
 | `AUTH_URL` | `http://localhost:3000` locally, your real origin in production. |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | From the Google Cloud OAuth client. |
+| `AUTH_MICROSOFT_ID` / `AUTH_MICROSOFT_SECRET` | Optional. From the Microsoft Entra app registration; enables **Connect Outlook**. |
 | `NEXT_PUBLIC_APP_URL` | Public origin of the app. |
 | `NEXT_PUBLIC_TRACKING_URL` | Dedicated tracking subdomain, e.g. `https://t.yourdomain.com`. Falls back to `NEXT_PUBLIC_APP_URL`. |
 | `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAIN` | Sign-in allowlist. Leave blank to allow any Google account. |
@@ -103,6 +104,29 @@ extra sending mailboxes. While the consent screen is in *Testing*, every
 mailbox you connect must be listed as a test user.
 
 **5. Authorised JavaScript origin:** `http://localhost:3000` (and your domain).
+
+### Microsoft (Outlook) setup — optional
+
+Outlook.com and Microsoft 365 mailboxes connect through Microsoft Graph.
+
+1. **Microsoft Entra admin center → App registrations → New registration.**
+   Supported account types: *Accounts in any organizational directory and
+   personal Microsoft accounts*.
+2. **Redirect URI** (platform **Web**):
+   ```
+   http://localhost:3000/api/integrations/microsoft/callback
+   https://your-domain.com/api/integrations/microsoft/callback
+   ```
+3. **Certificates & secrets → New client secret.** Copy the *value* into
+   `AUTH_MICROSOFT_SECRET`, and the *Application (client) ID* into
+   `AUTH_MICROSOFT_ID`. Secrets expire — note the date.
+4. **API permissions → Microsoft Graph → Delegated:** `openid`, `profile`,
+   `email`, `offline_access`, `User.Read`, `Mail.Send`, `Mail.Read`.
+
+No Microsoft review is needed to start. Some work tenants only let users
+approve apps from a verified publisher; for those, complete
+[publisher verification](https://learn.microsoft.com/entra/identity-platform/publisher-verification-overview)
+or have their admin grant consent.
 
 ---
 
@@ -250,7 +274,7 @@ var with that exact name exists — no extra wiring.
 Set for production, preview and development:
 
 `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `AUTH_GOOGLE_ID`,
-`AUTH_GOOGLE_SECRET`, `CRON_SECRET`, `ALLOWED_EMAILS`, `DAILY_SEND_LIMIT`,
+`AUTH_GOOGLE_SECRET`, `AUTH_MICROSOFT_ID`, `AUTH_MICROSOFT_SECRET`, `CRON_SECRET`, `ALLOWED_EMAILS`, `DAILY_SEND_LIMIT`,
 `MIN_SEND_GAP_MS`, `MAX_SEND_GAP_MS`.
 
 `AUTH_URL` and `NEXT_PUBLIC_APP_URL` are deliberately **not** set:

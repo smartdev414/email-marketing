@@ -1,16 +1,10 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 
-import { GOOGLE_SCOPES, gmailCapabilities } from "@/auth.config";
+import { GOOGLE_SCOPES } from "@/auth.config";
+import { MailboxConnectionError } from "@/lib/mailbox";
 import { prisma } from "@/lib/prisma";
 import { appUrl } from "@/lib/tracking";
-
-export class GoogleConnectionError extends Error {
-  constructor(message = "Gmail mailbox is not connected. Reconnect it on the Integrations page.") {
-    super(message);
-    this.name = "GoogleConnectionError";
-  }
-}
 
 /** Holds the OAuth `state` between the connect and callback routes. */
 export const MAILBOX_STATE_COOKIE = "mailbox_oauth_state";
@@ -65,7 +59,7 @@ export async function getOAuthClient(emailAccountId: string): Promise<OAuth2Clie
   const mailbox = await prisma.emailAccount.findUnique({ where: { id: emailAccountId } });
 
   if (!mailbox?.accessToken) {
-    throw new GoogleConnectionError();
+    throw new MailboxConnectionError();
   }
 
   const client = oauthClient();
@@ -104,51 +98,9 @@ export async function getGmail(emailAccountId: string) {
   return google.gmail({ version: "v1", auth });
 }
 
-/**
- * The display name a mailbox sends as: its custom From name, else the Gmail
- * account's own profile name. Mailboxes saved without a name look it up once
- * and store it, so recipients never see the app user's name instead.
- */
-export async function mailboxSenderName(mailbox: { id: string; fromName: string | null }) {
-  if (mailbox.fromName) return mailbox.fromName;
-
-  try {
-    const auth = await getOAuthClient(mailbox.id);
-    const profile = await google.oauth2({ version: "v2", auth }).userinfo.get();
-    const name = profile.data.name?.trim() || null;
-
-    if (name) {
-      await prisma.emailAccount.update({ where: { id: mailbox.id }, data: { fromName: name } });
-      mailbox.fromName = name;
-    }
-    return name;
-  } catch (error) {
-    console.error("Could not read the Gmail profile name", error);
-    return null;
-  }
-}
-
-/** True when a stored grant lets us send and read, and can be refreshed. */
-export function mailboxReady(mailbox: { scope: string | null; refreshToken: string | null }) {
-  const { canSend, canRead } = gmailCapabilities(mailbox.scope);
-  return canSend && canRead && Boolean(mailbox.refreshToken);
-}
-
-/** True when the team member has at least one mailbox ready to send. */
-export async function hasGmailAccess(userId: string) {
-  const mailboxes = await prisma.emailAccount.findMany({
-    where: { userId, isActive: true },
-    select: { scope: true, refreshToken: true },
-  });
-
-  return mailboxes.some(mailboxReady);
-}
-
-/**
- * Google answers `invalid_grant` once a refresh token is revoked or expired —
- * the mailbox has to be reconnected, retrying will not help.
- */
-export function isRevokedGrant(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /invalid_grant|invalid_client|unauthorized_client/i.test(message);
+/** The Google account's own profile name, used when no From name is set. */
+export async function gmailProfileName(emailAccountId: string) {
+  const auth = await getOAuthClient(emailAccountId);
+  const profile = await google.oauth2({ version: "v2", auth }).userinfo.get();
+  return profile.data.name?.trim() || null;
 }

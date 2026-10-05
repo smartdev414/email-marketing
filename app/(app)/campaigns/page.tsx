@@ -26,7 +26,7 @@ import {
 import { auth } from "@/auth";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type { CampaignStatus } from "@/lib/generated/prisma/enums";
-import { mailboxReady } from "@/lib/google";
+import { mailboxReady } from "@/lib/mailbox";
 import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 import { rate } from "@/lib/stats";
@@ -98,6 +98,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
         userId: true,
         email: true,
         dailyLimit: true,
+        provider: true,
         scope: true,
         refreshToken: true,
       },
@@ -168,7 +169,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
     <>
       <PageHeader
         title="Campaigns"
-        description="Each campaign draws a random audience from your contacts and rotates sending across the Gmail mailboxes you pick."
+        description="Each campaign draws a random audience from your contacts and rotates sending across the mailboxes you pick."
       >
         <CreateCampaignDialog templates={templates} senders={senders} />
       </PageHeader>
@@ -212,7 +213,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
               label="Filter by mailbox"
               defaultValue="all"
               searchable
-              searchPlaceholder="Search Gmail…"
+              searchPlaceholder="Search mailboxes…"
               options={[
                 { value: "all", label: "All mailboxes" },
                 ...campaignMailboxes.map((box) => ({ value: box.id, label: box.email })),

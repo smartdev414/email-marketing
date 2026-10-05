@@ -1,8 +1,8 @@
 import { revalidatePath } from "next/cache";
 
 import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
-import { GoogleConnectionError, isRevokedGrant, mailboxReady, mailboxSenderName } from "@/lib/google";
-import { sendEmail } from "@/lib/mailer";
+import { isRevokedGrant, MailboxConnectionError, mailboxReady, providerLabel } from "@/lib/mailbox";
+import { mailboxSenderName, sendEmail } from "@/lib/mailer";
 import { notify, sendDayKey } from "@/lib/notifications";
 import { describeSendWindow, isWithinSendWindow } from "@/lib/send-window";
 import { prisma } from "@/lib/prisma";
@@ -19,7 +19,7 @@ import { oneClickUnsubscribeUrl, textToHtml, withTracking } from "@/lib/tracking
 /** Platform request limit is 300s; stop well before it so results get saved. */
 export const SEND_BUDGET_MS = Number(process.env.SEND_BUDGET_MS ?? 240_000);
 
-/** Room left for one Gmail call plus the database writes that follow it. */
+/** Room left for one mailbox API call plus the database writes that follow it. */
 const SEND_HEADROOM_MS = 20_000;
 
 /** A crashed run releases its campaign once this lease runs out. */
@@ -287,7 +287,7 @@ async function sendLockedBatch(
     } catch (error) {
       // A dead mailbox is not the recipient's fault: drop the mailbox from the
       // rotation and leave the recipient queued for the next batch.
-      if (error instanceof GoogleConnectionError || isRevokedGrant(error)) {
+      if (error instanceof MailboxConnectionError || isRevokedGrant(error)) {
         slot.remaining = 0;
         brokenMailboxes.push(sender.email);
         await prisma.emailAccount.update({
@@ -300,7 +300,7 @@ async function sendLockedBatch(
           userId: sender.userId,
           type: "MAILBOX_DISCONNECTED",
           title: `${sender.email} needs reconnecting`,
-          body: `Gmail rejected it while sending “${campaign.name}”. Reconnect it on the Integrations page.`,
+          body: `${providerLabel(sender)} rejected it while sending “${campaign.name}”. Reconnect it on the Integrations page.`,
           url: "/integrations",
           dedupeKey: `disconnected:${sender.id}:${day}`,
         });

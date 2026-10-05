@@ -33,7 +33,7 @@ export default async function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        description="Contacts who replied to your campaigns. Answer here and it goes out in the same Gmail thread."
+        description="Contacts who replied to your campaigns. Answer here and it goes out in the same email thread."
       >
         <SyncInboxButton />
       </PageHeader>
@@ -42,7 +42,7 @@ export default async function InboxPage() {
         <EmptyState
           icon={Inbox}
           title="No replies yet"
-          description="Replies are detected by checking your Gmail threads. Hit Sync Gmail after a campaign has been out for a while."
+          description="Replies are detected by checking your mailbox threads. Hit Sync replies after a campaign has been out for a while."
         >
           <SyncInboxButton />
         </EmptyState>

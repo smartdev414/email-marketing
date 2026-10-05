@@ -22,7 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DAILY_SEND_LIMIT } from "@/lib/deliverability";
-import { integrationRedirectUri, mailboxReady } from "@/lib/google";
+import { integrationRedirectUri } from "@/lib/google";
+import { mailboxReady, providerLabel } from "@/lib/mailbox";
+import { microsoftConfigured, microsoftRedirectUri } from "@/lib/microsoft";
 import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 
@@ -46,15 +48,23 @@ const SORTS = [
 
 type MailboxStatus = "ready" | "paused" | "reconnect" | "disconnected";
 
-function ConnectButton({ size }: { size?: "sm" }) {
-  // A plain link: the route redirects off-site to Google's consent screen.
+function ConnectButtons({ size }: { size?: "sm" }) {
+  // Plain links: the routes redirect off-site to Google's or Microsoft's consent screen.
   return (
-    <Button asChild size={size}>
-      <a href="/api/integrations/google/connect">
-        <Plus className="size-4" />
-        Connect Gmail account
-      </a>
-    </Button>
+    <div className="flex flex-wrap gap-2">
+      <Button asChild size={size}>
+        <a href="/api/integrations/google/connect">
+          <Plus className="size-4" />
+          Connect Gmail
+        </a>
+      </Button>
+      <Button asChild size={size} variant="outline">
+        <a href="/api/integrations/microsoft/connect">
+          <Plus className="size-4" />
+          Connect Outlook
+        </a>
+      </Button>
+    </div>
   );
 }
 
@@ -75,6 +85,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
     select: {
       id: true,
       email: true,
+      provider: true,
       fromName: true,
       dailyLimit: true,
       isActive: true,
@@ -140,9 +151,9 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
     <>
       <PageHeader
         title="Integrations"
-        description="Connect the Gmail mailboxes your campaigns send from. Campaigns rotate between the mailboxes you pick, so no single inbox sends enough to look like spam."
+        description="Connect the Gmail and Outlook mailboxes your campaigns send from. Campaigns rotate between the mailboxes you pick, so no single inbox sends enough to look like spam."
       >
-        <ConnectButton />
+        <ConnectButtons />
       </PageHeader>
 
       {typeof connected === "string" ? (
@@ -178,7 +189,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle className="text-base">Gmail mailboxes</CardTitle>
+          <CardTitle className="text-base">Mailboxes</CardTitle>
           <CardDescription>
             Pause a mailbox to take it out of every campaign&rsquo;s rotation without losing its
             conversations.
@@ -189,15 +200,15 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
             <EmptyState
               icon={Mail}
               title="No mailboxes connected"
-              description="Connect at least one Gmail or Google Workspace account before you create a campaign. Several mailboxes on different domains spread the volume best."
+              description="Connect at least one Gmail, Google Workspace, Outlook or Microsoft 365 account before you create a campaign. Several mailboxes on different domains spread the volume best."
             >
-              <ConnectButton size="sm" />
+              <ConnectButtons size="sm" />
             </EmptyState>
           </CardContent>
         ) : (
           <CardContent className="p-0">
             <div className="flex flex-wrap items-center gap-2 px-(--card-spacing) pb-4">
-              <SearchInput placeholder="Search Gmail or name…" />
+              <SearchInput placeholder="Search email or name…" />
               <div className="flex flex-wrap gap-1">
                 {STATUS_FILTERS.map((filter) => (
                   <Button
@@ -247,6 +258,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                     const safe = {
                       id: mailbox.id,
                       email: mailbox.email,
+                      provider: mailbox.provider,
                       fromName: mailbox.fromName,
                       dailyLimit: mailbox.dailyLimit,
                       isActive: mailbox.isActive,
@@ -256,7 +268,12 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                     return (
                       <TableRow key={mailbox.id}>
                         <TableCell>
-                          <p className="font-medium">{mailbox.email}</p>
+                          <p className="flex items-center gap-2 font-medium">
+                            {mailbox.email}
+                            <Badge variant="outline" className="font-normal">
+                              {providerLabel(mailbox)}
+                            </Badge>
+                          </p>
                           <p className="text-muted-foreground text-xs">
                             {mailbox.fromName ? `Sends as ${mailbox.fromName} · ` : ""}
                             added {formatDistanceToNow(mailbox.createdAt, { addSuffix: true })}
@@ -330,6 +347,15 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
               testing, add every mailbox you connect as a test user:
             </p>
             <code className="mt-2 block break-all text-xs">{integrationRedirectUri()}</code>
+          </div>
+          <div className="bg-muted/40 rounded-md border p-3">
+            <p className="text-foreground font-medium">Microsoft Entra setup</p>
+            <p className="mt-1">
+              {microsoftConfigured()
+                ? "Add this redirect URI (platform: Web) to your app registration. It must allow personal Microsoft accounts and accounts in any organisation:"
+                : "Outlook is not configured yet. Register an app in Microsoft Entra, set AUTH_MICROSOFT_ID and AUTH_MICROSOFT_SECRET, and add this redirect URI (platform: Web):"}
+            </p>
+            <code className="mt-2 block break-all text-xs">{microsoftRedirectUri()}</code>
           </div>
         </CardContent>
       </Card>

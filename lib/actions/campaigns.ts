@@ -11,8 +11,13 @@ import {
 } from "@/lib/campaign-sender";
 import { suppress } from "@/lib/suppression";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { GoogleConnectionError, isRevokedGrant, mailboxReady, mailboxSenderName } from "@/lib/google";
-import { fetchBouncedAddresses, fetchThreadReplies, sendEmail } from "@/lib/mailer";
+import { isRevokedGrant, MailboxConnectionError, mailboxReady } from "@/lib/mailbox";
+import {
+  fetchBouncedAddresses,
+  fetchThreadReplies,
+  mailboxSenderName,
+  sendEmail,
+} from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
 import { recordReply } from "@/lib/replies";
 import { textToHtml } from "@/lib/tracking";
@@ -99,7 +104,7 @@ export async function createCampaign(input: CampaignInput): Promise<
   // land in those inboxes and are worked from this user's Inbox page.
   const senders = await prisma.emailAccount.findMany({
     where: { id: { in: senderIds }, userId: user.id, isActive: true },
-    select: { id: true, scope: true, refreshToken: true },
+    select: { id: true, provider: true, scope: true, refreshToken: true },
   });
   const usable = senders.filter(mailboxReady);
   if (usable.length === 0) {
@@ -175,7 +180,7 @@ export async function updateCampaign(
   // Same rule as creation: replies land in the owner's own mailboxes.
   const senders = await prisma.emailAccount.findMany({
     where: { id: { in: senderIds }, userId: campaign.fromUserId, isActive: true },
-    select: { id: true, scope: true, refreshToken: true },
+    select: { id: true, provider: true, scope: true, refreshToken: true },
   });
   const usable = senders.filter(mailboxReady);
   if (usable.length === 0) {
@@ -216,7 +221,9 @@ export async function duplicateCampaign(
   const source = await prisma.campaign.findUnique({
     where: { id },
     include: {
-      senders: { select: { id: true, isActive: true, scope: true, refreshToken: true } },
+      senders: {
+        select: { id: true, isActive: true, provider: true, scope: true, refreshToken: true },
+      },
       variants: { where: { isActive: true }, select: { subject: true, body: true } },
       _count: { select: { recipients: true } },
     },
@@ -310,7 +317,7 @@ export async function sendCampaignBatch(campaignId: string): Promise<SendSummary
 }
 
 /**
- * Reads delivery failures out of Gmail, marks those recipients bounced, and adds
+ * Reads delivery failures out of every mailbox, marks those recipients bounced, and adds
  * the address to the suppression list so no future campaign retries it.
  */
 export async function syncBounces(): Promise<
@@ -343,7 +350,7 @@ export async function syncBounces(): Promise<
   }
 
   if (unreachable.length === mailboxes.length) {
-    return { ok: false, error: "Could not reach Gmail — reconnect your mailboxes." };
+    return { ok: false, error: "Could not reach your mailboxes — reconnect them." };
   }
 
   let bounced = 0;
@@ -356,7 +363,7 @@ export async function syncBounces(): Promise<
 
     if (!contact) continue;
 
-    await suppress(email, "Hard bounce reported by Gmail");
+    await suppress(email, "Hard bounce reported by the mailbox");
 
     const updated = await prisma.campaignRecipient.updateMany({
       where: { contactId: contact.id, bouncedAt: null, sentAt: { not: null } },
@@ -381,7 +388,7 @@ export async function syncBounces(): Promise<
 }
 
 /**
- * Checks Gmail threads for inbound messages and marks recipients as replied.
+ * Checks mailbox threads for inbound messages and marks recipients as replied.
  * Run it from the campaign page or the inbox.
  */
 export async function syncReplies(campaignId?: string): Promise<
@@ -422,10 +429,10 @@ export async function syncReplies(campaignId?: string): Promise<
     try {
       inbound = await fetchThreadReplies(mailboxId, recipient.gmailThreadId!);
     } catch (error) {
-      if (error instanceof GoogleConnectionError || isRevokedGrant(error)) {
+      if (error instanceof MailboxConnectionError || isRevokedGrant(error)) {
         unreachable.add(mailboxEmail);
       }
-      lastError = error instanceof Error ? error.message : "Could not reach Gmail";
+      lastError = error instanceof Error ? error.message : "Could not reach the mailbox";
       continue;
     }
 

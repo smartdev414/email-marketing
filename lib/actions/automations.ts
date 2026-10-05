@@ -5,9 +5,8 @@ import { z } from "zod";
 
 import { requireUser } from "@/auth";
 import { screenAddress, sendDelay, sleep } from "@/lib/deliverability";
-import { mailboxSenderName } from "@/lib/google";
 import { isSuppressed } from "@/lib/suppression";
-import { sendEmail } from "@/lib/mailer";
+import { mailboxSenderName, sendEmail } from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
 import { buildVariables, renderTemplate } from "@/lib/template";
 import { oneClickUnsubscribeUrl, textToHtml, withTracking } from "@/lib/tracking";
@@ -99,7 +98,7 @@ export async function deleteAutomation(id: string): Promise<ActionResult> {
 
 /**
  * Finds recipients that match an active automation's trigger and sends the
- * follow-up in the same Gmail thread. Shared by the "Run now" button and the
+ * follow-up in the same email thread. Shared by the "Run now" button and the
  * cron endpoint, so a rule behaves identically either way.
  */
 export async function runAutomations(): Promise<

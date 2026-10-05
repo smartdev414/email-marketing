@@ -76,7 +76,7 @@ export function SyncInboxButton() {
       }
     >
       <RefreshCw className="size-4" />
-      {pending ? "Checking Gmail…" : "Sync Gmail"}
+      {pending ? "Checking mailboxes…" : "Sync replies"}
     </Button>
   );
 }

@@ -154,7 +154,7 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
               <Label>Send from</Label>
               {senders.length === 0 ? (
                 <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed p-3 text-sm">
-                  <span>No Gmail mailboxes connected yet.</span>
+                  <span>No mailboxes connected yet.</span>
                   <Button asChild size="sm" variant="outline">
                     <Link href="/integrations">
                       <Mail className="size-4" />

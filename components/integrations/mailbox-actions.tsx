@@ -44,6 +44,7 @@ type Props = {
   mailbox: {
     id: string;
     email: string;
+    provider: string;
     fromName: string | null;
     dailyLimit: number | null;
     isActive: boolean;
@@ -130,7 +131,7 @@ export function MailboxActions({ mailbox, defaultLimit }: Props) {
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <a
-              href={`/api/integrations/google/connect?hint=${encodeURIComponent(mailbox.email)}`}
+              href={`/api/integrations/${mailbox.provider === "microsoft" ? "microsoft" : "google"}/connect?hint=${encodeURIComponent(mailbox.email)}`}
             >
               <RefreshCw className="size-4" />
               Reconnect
@@ -205,7 +206,7 @@ export function MailboxActions({ mailbox, defaultLimit }: Props) {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {mailbox.connected
-                ? "Campaigns stop sending from it and its stored Google tokens are deleted. Reconnect the same address later to pick its conversations back up."
+                ? "Campaigns stop sending from it and its stored access tokens are deleted. Reconnect the same address later to pick its conversations back up."
                 : "The mailbox is deleted. Sent history stays, but replies and follow-ups for conversations it started can no longer be sent."}
             </AlertDialogDescription>
           </AlertDialogHeader>

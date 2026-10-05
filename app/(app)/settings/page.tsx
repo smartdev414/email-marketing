@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DAILY_SEND_LIMIT, MAX_SEND_GAP_MS, MIN_SEND_GAP_MS } from "@/lib/deliverability";
-import { mailboxReady } from "@/lib/google";
+import { mailboxReady } from "@/lib/mailbox";
 import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 import { appUrl, trackingUrl } from "@/lib/tracking";
@@ -33,7 +33,14 @@ export default async function SettingsPage() {
   const [mailboxes, suppressions, suppressionCount, team, account] = await Promise.all([
     prisma.emailAccount.findMany({
       where: { userId: userId ?? "" },
-      select: { id: true, dailyLimit: true, isActive: true, scope: true, refreshToken: true },
+      select: {
+        id: true,
+        dailyLimit: true,
+        isActive: true,
+        provider: true,
+        scope: true,
+        refreshToken: true,
+      },
     }),
     prisma.suppression.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
     prisma.suppression.count(),
@@ -83,7 +90,7 @@ export default async function SettingsPage() {
           <CardTitle className="text-base">Sending mailboxes</CardTitle>
           <CardDescription>
             {sending.length === 0
-              ? "No mailbox is ready to send. Connect a Gmail account on the Integrations page."
+              ? "No mailbox is ready to send. Connect a Gmail or Outlook account on the Integrations page."
               : `${sending.length} mailbox${sending.length === 1 ? " is" : "es are"} ready to send. Campaigns rotate between the ones you pick.`}
           </CardDescription>
         </CardHeader>

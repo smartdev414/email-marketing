@@ -23,7 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { aiConfigured } from "@/lib/ai-variants";
-import { mailboxReady } from "@/lib/google";
+import { mailboxReady } from "@/lib/mailbox";
 import { prisma } from "@/lib/prisma";
 import { getCampaignStats } from "@/lib/stats";
 import { mailboxQuotas } from "@/lib/suppression";
@@ -78,7 +78,14 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
       prisma.emailAccount.findMany({
         where: { userId: campaign.fromUserId, isActive: true },
         orderBy: { createdAt: "asc" },
-        select: { id: true, email: true, dailyLimit: true, scope: true, refreshToken: true },
+        select: {
+          id: true,
+          email: true,
+          dailyLimit: true,
+          provider: true,
+          scope: true,
+          refreshToken: true,
+        },
       }),
     ]);
 

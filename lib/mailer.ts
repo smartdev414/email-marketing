@@ -1,122 +1,48 @@
-import { getGmail, GoogleConnectionError } from "@/lib/google";
+import { gmailProfileName } from "@/lib/google";
+import {
+  gmailBouncedAddresses,
+  gmailRecentInboxThreadIds,
+  gmailThreadReplies,
+  sendGmail,
+} from "@/lib/mail/gmail";
+import {
+  outlookBouncedAddresses,
+  outlookRecentInboxThreadIds,
+  outlookThreadReplies,
+  sendOutlook,
+} from "@/lib/mail/outlook";
+import type { MailboxRef, SendOptions, SendResult, ThreadReply } from "@/lib/mail/types";
+import { MailboxConnectionError, providerOf } from "@/lib/mailbox";
+import { outlookProfileName } from "@/lib/microsoft";
 import { prisma } from "@/lib/prisma";
-import { htmlToText } from "@/lib/tracking";
 
-/** RFC 2047 encodes a header value when it contains non-ASCII characters. */
-function encodeHeader(value: string) {
-  return /^[\x20-\x7E]*$/.test(value)
-    ? value
-    : `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+/**
+ * One entry point for every mailbox, whatever its provider. Callers pass a
+ * mailbox id; this looks up whether it is Gmail or Outlook and hands the call
+ * to `lib/mail/gmail.ts` or `lib/mail/outlook.ts`.
+ */
+
+export type { SendResult, ThreadReply };
+
+async function findMailbox(emailAccountId: string) {
+  const mailbox = await prisma.emailAccount.findUnique({
+    where: { id: emailAccountId },
+    select: { id: true, email: true, provider: true },
+  });
+  if (!mailbox) throw new MailboxConnectionError();
+  const ref: MailboxRef = { id: mailbox.id, email: mailbox.email };
+  return { mailbox: ref, outlook: providerOf(mailbox) === "microsoft" };
 }
-
-function base64Url(input: string) {
-  return Buffer.from(input, "utf8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-type SendOptions = {
-  /** Connected mailbox (`EmailAccount.id`) the email goes out from. */
-  emailAccountId: string;
-  fromName?: string | null;
-  to: string;
-  subject: string;
-  html: string;
-  /** Set when replying inside an existing conversation. */
-  threadId?: string | null;
-  inReplyTo?: string | null;
-  /** Enables RFC 8058 one-click unsubscribe — a real deliverability signal. */
-  unsubscribeUrl?: string | null;
-};
-
-export type SendResult = {
-  messageId: string;
-  threadId: string;
-};
 
 export async function sendEmail({
   emailAccountId,
-  fromName,
-  to,
-  subject,
-  html,
-  threadId,
-  inReplyTo,
-  unsubscribeUrl,
-}: SendOptions): Promise<SendResult> {
-  const mailbox = await prisma.emailAccount.findUnique({
-    where: { id: emailAccountId },
-    select: { email: true },
-  });
-  if (!mailbox) throw new GoogleConnectionError();
-
-  const gmail = await getGmail(emailAccountId);
-  const fromAddress = mailbox.email;
-
-  const boundary = `bnd_${Math.random().toString(36).slice(2)}`;
-  const headers = [
-    `From: ${fromName ? `${encodeHeader(fromName)} <${fromAddress}>` : fromAddress}`,
-    `To: ${to}`,
-    `Subject: ${encodeHeader(subject)}`,
-    "MIME-Version: 1.0",
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-  ];
-
-  if (inReplyTo) {
-    headers.push(`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`);
-  }
-
-  if (unsubscribeUrl) {
-    headers.push(
-      `List-Unsubscribe: <${unsubscribeUrl}>`,
-      "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
-    );
-  }
-
-  const raw = [
-    ...headers,
-    "",
-    `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    "",
-    htmlToText(html),
-    "",
-    `--${boundary}`,
-    'Content-Type: text/html; charset="UTF-8"',
-    "",
-    html,
-    "",
-    `--${boundary}--`,
-  ].join("\r\n");
-
-  const response = await gmail.users.messages.send({
-    userId: "me",
-    requestBody: {
-      raw: base64Url(raw),
-      ...(threadId ? { threadId } : {}),
-    },
-  });
-
-  return {
-    messageId: response.data.id ?? "",
-    threadId: response.data.threadId ?? "",
-  };
-}
-
-export type ThreadReply = {
-  messageId: string;
-  from: string;
-  snippet: string;
-  receivedAt: Date;
-};
-
-function headerValue(
-  headers: { name?: string | null; value?: string | null }[] | undefined,
-  name: string,
-) {
-  return headers?.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value ?? "";
+  ...options
+}: SendOptions & {
+  /** Connected mailbox (`EmailAccount.id`) the email goes out from. */
+  emailAccountId: string;
+}): Promise<SendResult> {
+  const { mailbox, outlook } = await findMailbox(emailAccountId);
+  return outlook ? sendOutlook(mailbox, options) : sendGmail(mailbox, options);
 }
 
 /**
@@ -127,30 +53,8 @@ export async function fetchThreadReplies(
   emailAccountId: string,
   threadId: string,
 ): Promise<ThreadReply[]> {
-  const gmail = await getGmail(emailAccountId);
-
-  const thread = await gmail.users.threads.get({
-    userId: "me",
-    id: threadId,
-    format: "metadata",
-    metadataHeaders: ["From", "Date", "Subject"],
-  });
-
-  const messages = thread.data.messages ?? [];
-
-  return messages
-    .filter((message) => !message.labelIds?.includes("SENT"))
-    .filter((message) => !/mailer-daemon|postmaster/i.test(
-      headerValue(message.payload?.headers, "From"),
-    ))
-    .map((message) => ({
-      messageId: message.id ?? "",
-      from: headerValue(message.payload?.headers, "From"),
-      snippet: message.snippet ?? "",
-      receivedAt: message.internalDate
-        ? new Date(Number(message.internalDate))
-        : new Date(),
-    }));
+  const { mailbox, outlook } = await findMailbox(emailAccountId);
+  return outlook ? outlookThreadReplies(mailbox, threadId) : gmailThreadReplies(mailbox, threadId);
 }
 
 /**
@@ -159,68 +63,43 @@ export async function fetchThreadReplies(
  * actually have something new instead of every thread it ever sent.
  */
 export async function fetchRecentInboxThreadIds(emailAccountId: string, days = 3) {
-  const gmail = await getGmail(emailAccountId);
-  const threadIds = new Set<string>();
-  let pageToken: string | undefined;
-
-  do {
-    const list = await gmail.users.messages.list({
-      userId: "me",
-      q: `in:inbox -from:me newer_than:${days}d`,
-      maxResults: 500,
-      pageToken,
-    });
-    for (const message of list.data.messages ?? []) {
-      if (message.threadId) threadIds.add(message.threadId);
-    }
-    pageToken = list.data.nextPageToken ?? undefined;
-  } while (pageToken && threadIds.size < 2000);
-
-  return threadIds;
+  const { mailbox, outlook } = await findMailbox(emailAccountId);
+  return outlook
+    ? outlookRecentInboxThreadIds(mailbox, days)
+    : gmailRecentInboxThreadIds(mailbox, days);
 }
 
-const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
+/** Failed recipient addresses from recent delivery-failure notices. */
+export async function fetchBouncedAddresses(emailAccountId: string, days = 14) {
+  const { mailbox, outlook } = await findMailbox(emailAccountId);
+  return outlook ? outlookBouncedAddresses(mailbox, days) : gmailBouncedAddresses(mailbox, days);
+}
 
 /**
- * Reads delivery-failure notices out of the mailbox. Gmail has no bounce API,
- * so we look for mailer-daemon mail and pull the failed recipient out of the
- * `X-Failed-Recipients` header (or the snippet as a fallback).
+ * The display name a mailbox sends as: its custom From name, else the
+ * account's own profile name. Mailboxes saved without a name look it up once
+ * and store it, so recipients never see the app user's name instead.
  */
-export async function fetchBouncedAddresses(emailAccountId: string, days = 14) {
-  const gmail = await getGmail(emailAccountId);
+export async function mailboxSenderName(mailbox: {
+  id: string;
+  provider: string;
+  fromName: string | null;
+}) {
+  if (mailbox.fromName) return mailbox.fromName;
 
-  const list = await gmail.users.messages.list({
-    userId: "me",
-    q: `from:(mailer-daemon OR postmaster) newer_than:${days}d`,
-    maxResults: 100,
-  });
+  try {
+    const name =
+      providerOf(mailbox) === "microsoft"
+        ? await outlookProfileName(mailbox.id)
+        : await gmailProfileName(mailbox.id);
 
-  const bounced = new Map<string, Date>();
-
-  for (const item of list.data.messages ?? []) {
-    if (!item.id) continue;
-
-    const message = await gmail.users.messages.get({
-      userId: "me",
-      id: item.id,
-      format: "metadata",
-      metadataHeaders: ["X-Failed-Recipients", "To", "Subject"],
-    });
-
-    const failedHeader = headerValue(message.data.payload?.headers, "X-Failed-Recipients");
-    const candidates =
-      failedHeader.match(EMAIL_PATTERN) ?? message.data.snippet?.match(EMAIL_PATTERN) ?? [];
-
-    const receivedAt = message.data.internalDate
-      ? new Date(Number(message.data.internalDate))
-      : new Date();
-
-    for (const address of candidates) {
-      const normalized = address.toLowerCase();
-      if (/mailer-daemon|postmaster|googlemail\.com$/i.test(normalized)) continue;
-      if (!bounced.has(normalized)) bounced.set(normalized, receivedAt);
+    if (name) {
+      await prisma.emailAccount.update({ where: { id: mailbox.id }, data: { fromName: name } });
+      mailbox.fromName = name;
     }
+    return name;
+  } catch (error) {
+    console.error("Could not read the mailbox profile name", error);
+    return null;
   }
-
-  return bounced;
 }

@@ -159,7 +159,7 @@ export function CampaignControls({ campaignId, status, pending, batchSize }: Pro
             <AlertDialogTitle>Delete this campaign?</AlertDialogTitle>
             <AlertDialogDescription>
               The campaign and its tracking history are removed. Emails already sent stay in
-              your Gmail, and contacts are not deleted.
+              your mailbox, and contacts are not deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
