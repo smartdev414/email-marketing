@@ -54,7 +54,14 @@ export async function GET(request: NextRequest) {
     result = await exchangeMailboxCode(code);
   } catch (error) {
     console.error("Mailbox connection failed", error);
-    return back({ error: "Could not finish connecting the mailbox. Try again." });
+    // Surface Google's error code (e.g. redirect_uri_mismatch, invalid_grant)
+    // so a misconfigured client can be diagnosed without reading server logs.
+    const reason = (error as { response?: { data?: { error?: string } } }).response?.data?.error;
+    return back({
+      error: reason
+        ? `Could not finish connecting the mailbox (Google said: ${reason}). Try again.`
+        : "Could not finish connecting the mailbox. Try again.",
+    });
   }
 
   const { email, name, tokens } = result;
