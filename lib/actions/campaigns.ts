@@ -277,9 +277,11 @@ export async function deleteCampaign(id: string): Promise<ActionResult> {
 export async function setCampaignPaused(id: string, paused: boolean): Promise<ActionResult> {
   await requireUser();
 
+  // A pause or resume by hand overrides the automatic one, so the background
+  // sender will not resume a campaign someone deliberately paused.
   await prisma.campaign.update({
     where: { id },
-    data: { status: paused ? "PAUSED" : "SENDING" },
+    data: { status: paused ? "PAUSED" : "SENDING", autoPausedAt: null },
   });
 
   revalidatePath(`/campaigns/${id}`);
@@ -307,13 +309,13 @@ export async function startCampaign(id: string): Promise<ActionResult> {
 
 /**
  * Releases the next batch of pending emails for a campaign. Called from the
- * campaign page; the background sender at `/api/cron/campaigns` keeps going
- * on its own once a campaign is sending.
+ * campaign page, so it ignores the sending window: someone chose to send now.
+ * The background sender at `/api/cron/campaigns` keeps to the window.
  */
 export async function sendCampaignBatch(campaignId: string): Promise<SendSummary> {
   await requireUser();
 
-  return sendBatch(campaignId, { deadline: Date.now() + SEND_BUDGET_MS });
+  return sendBatch(campaignId, { deadline: Date.now() + SEND_BUDGET_MS, manual: true });
 }
 
 /**

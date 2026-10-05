@@ -42,6 +42,11 @@ type BatchOptions = {
   deadline: number;
   /** Caps the batch below the campaign's own `batchSize`. */
   limit?: number;
+  /**
+   * Released by hand from the campaign page ("Send next N"): ignores the
+   * sending window, and may send from a campaign that was only auto-paused.
+   */
+  manual?: boolean;
 };
 
 /**
@@ -52,9 +57,9 @@ type BatchOptions = {
  */
 export async function sendCampaignBatch(
   campaignId: string,
-  { deadline, limit }: BatchOptions,
+  { deadline, limit, manual = false }: BatchOptions,
 ): Promise<SendSummary> {
-  if (!isWithinSendWindow()) {
+  if (!manual && !isWithinSendWindow()) {
     return { ok: false, error: `Outside sending hours (${describeSendWindow()}).` };
   }
 
@@ -75,7 +80,7 @@ export async function sendCampaignBatch(
   }
 
   try {
-    return await sendLockedBatch(campaignId, { deadline, limit });
+    return await sendLockedBatch(campaignId, { deadline, limit, manual });
   } finally {
     await prisma.campaign.updateMany({
       where: { id: campaignId },
@@ -86,7 +91,7 @@ export async function sendCampaignBatch(
 
 async function sendLockedBatch(
   campaignId: string,
-  { deadline, limit }: BatchOptions,
+  { deadline, limit, manual = false }: BatchOptions,
 ): Promise<SendSummary> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
@@ -103,7 +108,10 @@ async function sendLockedBatch(
   });
 
   if (!campaign) return { ok: false, error: "Campaign not found" };
-  if (campaign.status === "PAUSED") return { ok: false, error: "Campaign is paused" };
+  // An auto-pause only means "outside sending hours", which a manual send ignores.
+  if (campaign.status === "PAUSED" && !(manual && campaign.autoPausedAt)) {
+    return { ok: false, error: "Campaign is paused" };
+  }
 
   const ready = campaign.senders.filter(mailboxReady);
   if (ready.length === 0) {
@@ -152,7 +160,7 @@ async function sendLockedBatch(
   if (pending.length === 0) {
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: "COMPLETED", completedAt: new Date() },
+      data: { status: "COMPLETED", completedAt: new Date(), autoPausedAt: null },
     });
     await notifyCompleted(campaign);
     revalidatePath(`/campaigns/${campaignId}`);
@@ -231,7 +239,7 @@ async function sendLockedBatch(
     // Human-looking pacing between sends, as long as the request has time left.
     const delay = attempts > 0 ? sendDelay() : 0;
     if (Date.now() + delay + SEND_HEADROOM_MS > deadline) break;
-    if (!isWithinSendWindow(new Date(Date.now() + delay))) break;
+    if (!manual && !isWithinSendWindow(new Date(Date.now() + delay))) break;
 
     const slot = nextSlot();
     if (!slot) break;
@@ -332,7 +340,7 @@ async function sendLockedBatch(
   if (remaining === 0) {
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: "COMPLETED", completedAt: new Date() },
+      data: { status: "COMPLETED", completedAt: new Date(), autoPausedAt: null },
     });
     await notifyCompleted(campaign);
   }
@@ -395,6 +403,11 @@ function notifyCompleted(campaign: CampaignRef) {
   });
 }
 
+function revalidateCampaignLists() {
+  revalidatePath("/campaigns");
+  revalidatePath("/dashboard");
+}
+
 /** Emails each campaign may release per background run, spreading volume over the day. */
 const CRON_SENDS_PER_RUN = Number(process.env.CRON_SENDS_PER_RUN ?? 5);
 
@@ -407,13 +420,35 @@ export type CampaignRunResult = {
  * One pass of the background sender: a small batch for every campaign that is
  * currently sending. Campaigns enter this loop once someone starts them from
  * the campaign page; paused and completed ones are left alone.
+ *
+ * It also follows the sending window: outside it, sending campaigns are
+ * auto-paused; inside it, the campaigns it auto-paused are resumed. Campaigns
+ * someone paused by hand have no `autoPausedAt` and are never resumed here.
  */
 export async function runCampaignSends(budgetMs = SEND_BUDGET_MS) {
   const deadline = Date.now() + budgetMs;
 
   if (!isWithinSendWindow()) {
-    return { campaigns: 0, processed: 0, sent: 0, results: [], skipped: `outside ${describeSendWindow()}` };
+    const paused = await prisma.campaign.updateMany({
+      where: { status: "SENDING" },
+      data: { status: "PAUSED", autoPausedAt: new Date() },
+    });
+    if (paused.count > 0) revalidateCampaignLists();
+    return {
+      campaigns: 0,
+      processed: 0,
+      sent: 0,
+      results: [],
+      autoPaused: paused.count,
+      skipped: `outside ${describeSendWindow()}`,
+    };
   }
+
+  const resumed = await prisma.campaign.updateMany({
+    where: { status: "PAUSED", autoPausedAt: { not: null } },
+    data: { status: "SENDING", autoPausedAt: null },
+  });
+  if (resumed.count > 0) revalidateCampaignLists();
 
   const campaigns = await prisma.campaign.findMany({
     where: { status: "SENDING" },
@@ -445,6 +480,7 @@ export async function runCampaignSends(budgetMs = SEND_BUDGET_MS) {
 
   return {
     campaigns: campaigns.length,
+    autoResumed: resumed.count,
     processed: results.length,
     sent: results.reduce((total, result) => total + (result.ok ? result.sent : 0), 0),
     results,

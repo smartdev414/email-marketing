@@ -283,6 +283,9 @@ model Campaign {
   /// Lease held while a batch is going out, so the background sender and a
   /// manual "Send next batch" never pick up the same recipients twice.
   sendLockedUntil DateTime?
+  /// Set when the background sender paused it at the end of the sending window;
+  /// it resumes it at the next window. Manual pauses leave this null.
+  autoPausedAt    DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 

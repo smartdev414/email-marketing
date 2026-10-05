@@ -25,6 +25,7 @@ import {
 import { aiConfigured } from "@/lib/ai-variants";
 import { mailboxReady } from "@/lib/mailbox";
 import { prisma } from "@/lib/prisma";
+import { describeSendWindow } from "@/lib/send-window";
 import { getCampaignStats } from "@/lib/stats";
 import { mailboxQuotas } from "@/lib/suppression";
 
@@ -136,6 +137,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         <CampaignControls
           campaignId={campaign.id}
           status={campaign.status}
+          autoPaused={Boolean(campaign.autoPausedAt)}
           pending={stats.pending}
           batchSize={campaign.batchSize}
         />
@@ -143,6 +145,11 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <StatusBadge status={campaign.status} />
+        {campaign.status === "PAUSED" && campaign.autoPausedAt ? (
+          <Badge variant="outline" className="font-normal">
+            Auto-paused · sends {describeSendWindow()}
+          </Badge>
+        ) : null}
         <Badge variant="secondary" className="font-normal">
           {campaign.template.name}
         </Badge>

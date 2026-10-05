@@ -28,11 +28,19 @@ import { Button } from "@/components/ui/button";
 type Props = {
   campaignId: string;
   status: string;
+  /** Paused by the background sender outside sending hours, not by a person. */
+  autoPaused?: boolean;
   pending: number;
   batchSize: number;
 };
 
-export function CampaignControls({ campaignId, status, pending, batchSize }: Props) {
+export function CampaignControls({
+  campaignId,
+  status,
+  autoPaused = false,
+  pending,
+  batchSize,
+}: Props) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
 
@@ -137,7 +145,8 @@ export function CampaignControls({ campaignId, status, pending, batchSize }: Pro
       <Button
         variant={isDraft ? "outline" : "default"}
         onClick={send}
-        disabled={busy || pending === 0 || isPaused}
+        // Sending by hand ignores sending hours, so an auto-pause does not block it.
+        disabled={busy || pending === 0 || (isPaused && !autoPaused)}
       >
         <Send className="size-4" />
         {pending === 0
