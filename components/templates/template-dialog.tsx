@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, Info, Plus } from "lucide-react";
-import { useMemo, useState, useTransition } from "react";
+import { AlertTriangle, ImagePlus, Info, Loader2, Plus } from "lucide-react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { checkContent } from "@/lib/deliverability";
@@ -26,6 +26,7 @@ import {
   PREVIEW_CONTACT,
   TEMPLATE_VARIABLES,
   buildVariables,
+  imageToken,
   renderTemplate,
 } from "@/lib/template";
 import { textToHtml } from "@/lib/tracking";
@@ -75,8 +76,45 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
   const previewSubject = renderTemplate(values.subject || "(no subject)", variables);
   const previewBody = renderTemplate(textToHtml(values.body || "(empty)"), variables);
 
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
   function insertVariable(token: string) {
     setValues((current) => ({ ...current, body: `${current.body}${token}` }));
+  }
+
+  /** Puts an image tag on its own paragraph at the cursor (or the end). */
+  function insertImage(url: string) {
+    const textarea = bodyRef.current;
+    setValues((current) => {
+      const at = textarea ? textarea.selectionStart : current.body.length;
+      const before = current.body.slice(0, at).replace(/\s+$/, "");
+      const after = current.body.slice(at).replace(/^\s+/, "");
+      const body = [before, imageToken(url), after].filter(Boolean).join("\n\n");
+      return { ...current, body };
+    });
+  }
+
+  async function uploadImage(file: File) {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/uploads/template-image", { method: "POST", body: form });
+      const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!response.ok || !data.url) {
+        toast.error(data.error ?? "Could not upload the image.");
+        return;
+      }
+      insertImage(data.url);
+      toast.success("Image added");
+    } catch {
+      toast.error("Could not upload the image.");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
   function submit(event: React.FormEvent) {
@@ -115,7 +153,7 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
             <DialogTitle>{template?.id ? "Edit template" : "New template"}</DialogTitle>
             <DialogDescription>
               Write plain text — line breaks become paragraphs. Use variables to personalise
-              each email.
+              each email, and Insert image to place a picture where your cursor is.
             </DialogDescription>
           </DialogHeader>
 
@@ -169,6 +207,7 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
                 <Label htmlFor="body">Body</Label>
                 <Textarea
                   id="body"
+                  ref={bodyRef}
                   required
                   rows={11}
                   className="max-h-[45dvh] overflow-y-auto"
@@ -178,7 +217,32 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
                     setValues((current) => ({ ...current, body: event.target.value }))
                   }
                 />
-                <div className="flex flex-wrap gap-1 pt-1">
+                <div className="flex flex-wrap items-center gap-1 pt-1">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadImage(file);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    disabled={uploading}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    {uploading ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ImagePlus className="size-3.5" />
+                    )}
+                    {uploading ? "Uploading…" : "Insert image"}
+                  </Button>
                   {TEMPLATE_VARIABLES.map((variable) => (
                     <Badge
                       key={variable.token}
@@ -236,7 +300,7 @@ export function TemplateDialog({ template, open, onOpenChange, trigger }: Props)
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" disabled={pending || uploading}>
               {pending ? "Saving…" : "Save template"}
             </Button>
           </DialogFooter>

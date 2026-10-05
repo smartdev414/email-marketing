@@ -47,3 +47,31 @@ export const PREVIEW_CONTACT: ContactLike = {
   jobTitle: "Head of Sales",
   country: "United States",
 };
+
+/**
+ * Images live in the plain-text body as `[image: https://…]` and become an
+ * `<img>` when the email is rendered. Only https URLs count, and the URL
+ * cannot contain quotes or angle brackets, so it is safe inside `src`.
+ */
+const IMAGE_TOKEN = /\[image:\s*(https:\/\/[^\s"'<>\]]+)\s*\]/gi;
+
+export function imageToken(url: string) {
+  return `[image: ${url}]`;
+}
+
+export function hasImages(body: string) {
+  return new RegExp(IMAGE_TOKEN.source, "i").test(body);
+}
+
+/** The body without its image tags, for checks that should ignore them. */
+export function withoutImages(body: string) {
+  return body.replace(IMAGE_TOKEN, "");
+}
+
+export function renderImages(html: string) {
+  return html.replace(
+    IMAGE_TOKEN,
+    (_match, url: string) =>
+      `<img src="${url}" alt="" style="display:block;max-width:100%;height:auto;border:0" />`,
+  );
+}

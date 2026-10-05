@@ -46,6 +46,7 @@ Open <http://localhost:3000> and sign in with Google.
 | `AUTH_URL` | `http://localhost:3000` locally, your real origin in production. |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | From the Google Cloud OAuth client. |
 | `AUTH_MICROSOFT_ID` / `AUTH_MICROSOFT_SECRET` | Optional. From the Microsoft Entra app registration; enables **Connect Outlook**. |
+| `BLOB_READ_WRITE_TOKEN` | Optional. Vercel Blob store token; enables **Insert image** in templates. Vercel adds it when you connect a Blob store to the project. |
 | `NEXT_PUBLIC_APP_URL` | Public origin of the app. |
 | `NEXT_PUBLIC_TRACKING_URL` | Dedicated tracking subdomain, e.g. `https://t.yourdomain.com`. Falls back to `NEXT_PUBLIC_APP_URL`. |
 | `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAIN` | Sign-in allowlist. Leave blank to allow any Google account. |
@@ -274,7 +275,7 @@ var with that exact name exists — no extra wiring.
 Set for production, preview and development:
 
 `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `AUTH_GOOGLE_ID`,
-`AUTH_GOOGLE_SECRET`, `AUTH_MICROSOFT_ID`, `AUTH_MICROSOFT_SECRET`, `CRON_SECRET`, `ALLOWED_EMAILS`, `DAILY_SEND_LIMIT`,
+`AUTH_GOOGLE_SECRET`, `AUTH_MICROSOFT_ID`, `AUTH_MICROSOFT_SECRET`, `BLOB_READ_WRITE_TOKEN`, `CRON_SECRET`, `ALLOWED_EMAILS`, `DAILY_SEND_LIMIT`,
 `MIN_SEND_GAP_MS`, `MAX_SEND_GAP_MS`.
 
 `AUTH_URL` and `NEXT_PUBLIC_APP_URL` are deliberately **not** set:

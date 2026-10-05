@@ -1,3 +1,5 @@
+import { renderImages } from "@/lib/template";
+
 export function appUrl() {
   // Prefer an explicit value; otherwise fall back to the domain Vercel assigns,
   // so a fresh deploy produces working links before anything is configured.
@@ -82,14 +84,19 @@ export function withTracking(
   return parts.join("\n");
 }
 
-/** Turns a plain-text template body into simple HTML paragraphs. */
+/**
+ * Turns a plain-text template body into simple HTML paragraphs, and its
+ * `[image: …]` tags into images.
+ */
 export function textToHtml(text: string) {
-  if (/<[a-z][\s\S]*>/i.test(text)) return text;
+  if (/<[a-z][\s\S]*>/i.test(text)) return renderImages(text);
 
-  return text
-    .split(/\n{2,}/)
-    .map((block) => `<p>${block.replace(/\n/g, "<br />")}</p>`)
-    .join("\n");
+  return renderImages(
+    text
+      .split(/\n{2,}/)
+      .map((block) => `<p>${block.replace(/\n/g, "<br />")}</p>`)
+      .join("\n"),
+  );
 }
 
 export function htmlToText(html: string) {

@@ -1,3 +1,5 @@
+import { hasImages, withoutImages } from "@/lib/template";
+
 /**
  * Deliverability guardrails. Cold outreach gets filtered on volume, content and
  * list hygiene, so every send goes through these checks.
@@ -172,7 +174,8 @@ export function checkContent(subject: string, body: string): ContentWarning[] {
     });
   }
 
-  const links = (body.match(/https?:\/\//g) ?? []).length;
+  // Image tags carry a URL too, but they are flagged separately below.
+  const links = (withoutImages(body).match(/https?:\/\//g) ?? []).length;
   if (links > 2) {
     warnings.push({
       level: "warn",
@@ -180,7 +183,7 @@ export function checkContent(subject: string, body: string): ContentWarning[] {
     });
   }
 
-  if (/<img/i.test(body)) {
+  if (/<img/i.test(body) || hasImages(body)) {
     warnings.push({
       level: "warn",
       message: "Images in a first-touch cold email hurt deliverability.",
