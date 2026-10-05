@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { UrlSelect } from "@/components/url-select";
 import { TemplateCard } from "@/components/templates/template-card";
@@ -13,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CardContent } from "@/components/ui/card";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { paginate, parsePage } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = { title: "Templates" };
@@ -27,6 +29,9 @@ const USAGE_FILTERS = [
   { value: "used", label: "In use" },
   { value: "unused", label: "Unused" },
 ];
+
+/** Four rows of the three-column grid. */
+const PAGE_SIZE = 12;
 
 const SORTS = [
   { value: "updated", label: "Recently updated" },
@@ -64,6 +69,8 @@ export default async function TemplatesPage({ searchParams }: PageProps<"/templa
       template._count.campaigns + template._count.automations;
     templates.sort((a, b) => uses(b) - uses(a));
   }
+
+  const pageOfTemplates = paginate(templates, parsePage(params.page), PAGE_SIZE);
 
   /** Same page with one filter changed and the others kept. */
   function hrefWith(change: { archived?: boolean; usage?: string }) {
@@ -136,39 +143,48 @@ export default async function TemplatesPage({ searchParams }: PageProps<"/templa
           {showArchived ? null : <TemplateDialog />}
         </EmptyState>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {templates.map((template) => (
-            <TemplateCard
-              key={template.id}
-              isArchived={template.isArchived}
-              template={{
-                id: template.id,
-                name: template.name,
-                subject: template.subject,
-                body: template.body,
-                description: template.description ?? "",
-              }}
-            >
-              <CardContent className="flex flex-1 flex-col justify-between gap-4">
-                <p className="text-muted-foreground line-clamp-4 text-sm whitespace-pre-line">
-                  {template.body}
-                </p>
-                <div className="flex items-center justify-between gap-2">
-                  <Badge variant="secondary" className="font-normal">
-                    {template._count.campaigns} campaign
-                    {template._count.campaigns === 1 ? "" : "s"}
-                    {template._count.automations > 0
-                      ? ` · ${template._count.automations} automation${template._count.automations === 1 ? "" : "s"}`
-                      : ""}
-                  </Badge>
-                  <span className="text-muted-foreground text-xs">
-                    Updated {formatDistanceToNow(template.updatedAt, { addSuffix: true })}
-                  </span>
-                </div>
-              </CardContent>
-            </TemplateCard>
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {pageOfTemplates.items.map((template) => (
+              <TemplateCard
+                key={template.id}
+                isArchived={template.isArchived}
+                template={{
+                  id: template.id,
+                  name: template.name,
+                  subject: template.subject,
+                  body: template.body,
+                  description: template.description ?? "",
+                }}
+              >
+                <CardContent className="flex flex-1 flex-col justify-between gap-4">
+                  <p className="text-muted-foreground line-clamp-4 text-sm whitespace-pre-line">
+                    {template.body}
+                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="secondary" className="font-normal">
+                      {template._count.campaigns} campaign
+                      {template._count.campaigns === 1 ? "" : "s"}
+                      {template._count.automations > 0
+                        ? ` · ${template._count.automations} automation${template._count.automations === 1 ? "" : "s"}`
+                        : ""}
+                    </Badge>
+                    <span className="text-muted-foreground text-xs">
+                      Updated {formatDistanceToNow(template.updatedAt, { addSuffix: true })}
+                    </span>
+                  </div>
+                </CardContent>
+              </TemplateCard>
+            ))}
+          </div>
+          <Pagination
+            {...pageOfTemplates}
+            pathname="/templates"
+            params={params}
+            noun="templates"
+            className="mt-6"
+          />
+        </>
       )}
     </>
   );

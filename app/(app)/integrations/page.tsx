@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { EmptyState } from "@/components/empty-state";
 import { MailboxActions, MailboxActiveSwitch } from "@/components/integrations/mailbox-actions";
 import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,7 @@ import { DAILY_SEND_LIMIT } from "@/lib/deliverability";
 import { integrationRedirectUri } from "@/lib/google";
 import { mailboxReady, providerLabel } from "@/lib/mailbox";
 import { microsoftConfigured, microsoftRedirectUri } from "@/lib/microsoft";
+import { paginate, parsePage } from "@/lib/pagination";
 import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 
@@ -47,6 +49,8 @@ const SORTS = [
 ];
 
 type MailboxStatus = "ready" | "paused" | "reconnect" | "disconnected";
+
+const PAGE_SIZE = 20;
 
 function ConnectButtons({ size }: { size?: "sm" }) {
   // Plain links: the routes redirect off-site to Google's or Microsoft's consent screen.
@@ -138,6 +142,9 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
   if (sort === "sent") visible.sort((a, b) => sentOf(b.id) - sentOf(a.id));
   if (sort === "remaining") visible.sort((a, b) => leftOf(b.id) - leftOf(a.id));
   if (sort === "campaigns") visible.sort((a, b) => b._count.campaigns - a._count.campaigns);
+
+  // Paged after filtering and sorting: status and today's counts are derived.
+  const pageOfMailboxes = paginate(visible, parsePage(params.page), PAGE_SIZE);
 
   function statusHref(value: string) {
     const search = new URLSearchParams();
@@ -250,7 +257,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visible.map((mailbox) => {
+                  {pageOfMailboxes.items.map((mailbox) => {
                     const quota = quotas.get(mailbox.id);
                     const hasTokens = Boolean(mailbox.accessToken);
                     const ready = hasTokens && mailboxReady(mailbox);
@@ -317,6 +324,14 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                 </TableBody>
               </Table>
             )}
+            <Pagination
+              {...pageOfMailboxes}
+              pathname="/integrations"
+              // Not `connected` / `error`: those are one-off banners.
+              params={{ q: params.q, status: params.status, sort: params.sort }}
+              noun="mailboxes"
+              className="px-(--card-spacing) pt-4"
+            />
           </CardContent>
         )}
       </Card>

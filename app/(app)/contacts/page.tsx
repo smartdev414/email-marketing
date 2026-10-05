@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { StatusBadge } from "@/components/status-badge";
 import { ContactDialog } from "@/components/contacts/contact-dialog";
@@ -22,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { getWarehouseStats } from "@/lib/actions/warehouse";
 import type { ContactStatus } from "@/lib/generated/prisma/enums";
+import { pageInfo, parsePage } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = { title: "Contacts" };
@@ -40,7 +42,7 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
   const params = await searchParams;
   const query = typeof params.q === "string" ? params.q.trim() : "";
   const status = typeof params.status === "string" ? params.status : "all";
-  const page = Math.max(1, Number(params.page ?? 1) || 1);
+  const page = parsePage(params.page);
 
   const where = {
     ...(status !== "all" ? { status: status as ContactStatus } : {}),
@@ -67,15 +69,6 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
     getWarehouseStats(),
   ]);
 
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
-  function pageHref(next: number) {
-    const search = new URLSearchParams();
-    if (query) search.set("q", query);
-    if (status !== "all") search.set("status", status);
-    search.set("page", String(next));
-    return `/contacts?${search.toString()}`;
-  }
 
   function filterHref(value: string) {
     const search = new URLSearchParams();
@@ -188,21 +181,13 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
         </CardContent>
       </Card>
 
-      {pageCount > 1 ? (
-        <div className="mt-4 flex items-center justify-between">
-          <p className="text-muted-foreground text-sm">
-            Page {page} of {pageCount}
-          </p>
-          <div className="flex gap-2">
-            <Button asChild variant="outline" size="sm" disabled={page <= 1}>
-              <Link href={pageHref(Math.max(1, page - 1))}>Previous</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm" disabled={page >= pageCount}>
-              <Link href={pageHref(Math.min(pageCount, page + 1))}>Next</Link>
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      <Pagination
+        {...pageInfo(page, total, PAGE_SIZE)}
+        pathname="/contacts"
+        params={params}
+        noun="contacts"
+        className="mt-4"
+      />
     </>
   );
 }

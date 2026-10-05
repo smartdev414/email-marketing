@@ -10,6 +10,7 @@ import {
 } from "@/components/campaigns/create-campaign-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { StatusBadge } from "@/components/status-badge";
 import { UrlSelect } from "@/components/url-select";
@@ -27,6 +28,7 @@ import { auth } from "@/auth";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import type { CampaignStatus } from "@/lib/generated/prisma/enums";
 import { mailboxReady } from "@/lib/mailbox";
+import { paginate, parsePage } from "@/lib/pagination";
 import { mailboxQuotas } from "@/lib/suppression";
 import { prisma } from "@/lib/prisma";
 import { rate } from "@/lib/stats";
@@ -40,6 +42,8 @@ const STATUS_FILTERS: { value: "all" | CampaignStatus; label: string }[] = [
   { value: "PAUSED", label: "Paused" },
   { value: "COMPLETED", label: "Completed" },
 ];
+
+const PAGE_SIZE = 20;
 
 const SORTS = [
   { value: "newest", label: "Newest first" },
@@ -156,6 +160,9 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       (a, b) => (lastSent.get(b.id)?.getTime() ?? 0) - (lastSent.get(a.id)?.getTime() ?? 0),
     );
 
+  // Paged after sorting, since several sorts use the stats computed above.
+  const pageOfCampaigns = paginate(campaigns, parsePage(params.page), PAGE_SIZE);
+
   function statusHref(value: string) {
     const search = new URLSearchParams();
     if (query) search.set("q", query);
@@ -251,7 +258,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {campaigns.map((campaign) => {
+                    {pageOfCampaigns.items.map((campaign) => {
                       const bucket = counts.get(campaign.id);
                       const sent = bucket?.sentAt ?? 0;
                       const opened = bucket?.firstOpenedAt ?? 0;
@@ -328,6 +335,14 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
               </CardContent>
             </Card>
           )}
+
+          <Pagination
+            {...pageOfCampaigns}
+            pathname="/campaigns"
+            params={params}
+            noun="campaigns"
+            className="mt-4"
+          />
         </>
       )}
     </>
