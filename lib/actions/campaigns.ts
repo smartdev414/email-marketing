@@ -326,7 +326,7 @@ export async function syncBounces(): Promise<
   const user = await requireUser();
 
   const mailboxes = await prisma.emailAccount.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, accessToken: { not: null } },
     select: { id: true, email: true },
   });
 
@@ -400,7 +400,8 @@ export async function syncReplies(campaignId?: string): Promise<
     where: {
       ...(campaignId ? { campaignId } : {}),
       assignedToId: user.id,
-      emailAccountId: { not: null },
+      // Disconnected mailboxes have no tokens to read with; skip them.
+      emailAccount: { accessToken: { not: null } },
       gmailThreadId: { not: null },
       repliedAt: null,
       status: { in: ["SENT", "OPENED"] },
@@ -429,10 +430,13 @@ export async function syncReplies(campaignId?: string): Promise<
     try {
       inbound = await fetchThreadReplies(mailboxId, recipient.gmailThreadId!);
     } catch (error) {
+      // A mailbox that needs reconnecting is reported as a warning below; it
+      // must not turn the whole sync into an error for the other mailboxes.
       if (error instanceof MailboxConnectionError || isRevokedGrant(error)) {
         unreachable.add(mailboxEmail);
+      } else {
+        lastError = error instanceof Error ? error.message : "Could not reach the mailbox";
       }
-      lastError = error instanceof Error ? error.message : "Could not reach the mailbox";
       continue;
     }
 
