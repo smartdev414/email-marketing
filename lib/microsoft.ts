@@ -1,3 +1,5 @@
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
+
 import { MICROSOFT_SCOPES, MailboxConnectionError } from "@/lib/mailbox";
 import { prisma } from "@/lib/prisma";
 import { appUrl } from "@/lib/tracking";
@@ -13,6 +15,24 @@ const GRAPH = "https://graph.microsoft.com/v1.0";
 
 /** Refresh a little early so a token never expires mid-request. */
 const EXPIRY_SKEW_SECONDS = 5 * 60;
+
+/**
+ * Node's built-in fetch ignores HTTPS_PROXY, unlike the googleapis client. On a
+ * machine that only reaches the internet through a proxy, Microsoft calls go
+ * through it too; without proxy variables (e.g. on Vercel) this is plain fetch.
+ */
+const proxyAgent =
+  process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy
+    ? new EnvHttpProxyAgent()
+    : null;
+
+function msFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (!proxyAgent) return fetch(url, { ...init, cache: "no-store" });
+  return undiciFetch(url, {
+    ...(init as Parameters<typeof undiciFetch>[1]),
+    dispatcher: proxyAgent,
+  }) as unknown as Promise<Response>;
+}
 
 /** Holds the OAuth `state` between the connect and callback routes. */
 export const MICROSOFT_STATE_COOKIE = "microsoft_oauth_state";
@@ -62,11 +82,10 @@ type TokenResponse = {
 
 async function requestToken(body: Record<string, string>): Promise<TokenResponse> {
   const { clientId, clientSecret } = clientCredentials();
-  const response = await fetch(`${AUTHORITY}/token`, {
+  const response = await msFetch(`${AUTHORITY}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, ...body }),
-    cache: "no-store",
   });
 
   const data = (await response.json().catch(() => ({}))) as Partial<TokenResponse> & {
@@ -112,10 +131,9 @@ export async function exchangeMicrosoftCode(code: string) {
   let me: { mail?: string | null; userPrincipalName?: string | null; displayName?: string | null } =
     {};
   try {
-    const response = await fetch(`${GRAPH}/me?$select=mail,userPrincipalName,displayName`, {
+    const response = await msFetch(`${GRAPH}/me?$select=mail,userPrincipalName,displayName`, {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
-      cache: "no-store",
-    });
+      });
     if (response.ok) me = await response.json();
   } catch (error) {
     console.error("Could not read the Microsoft profile", error);
@@ -202,7 +220,7 @@ export async function getGraph(emailAccountId: string) {
     const token = await freshAccessToken(mailbox!, attempt === 1);
     const { body, headers, ...rest } = init;
 
-    const response = await fetch(path.startsWith("https://") ? path : `${GRAPH}${path}`, {
+    const response = await msFetch(path.startsWith("https://") ? path : `${GRAPH}${path}`, {
       ...rest,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -211,8 +229,7 @@ export async function getGraph(emailAccountId: string) {
         ...headers,
       },
       body: typeof body === "object" ? JSON.stringify(body) : body,
-      cache: "no-store",
-    });
+      });
 
     // An access token can be revoked before it expires: refresh once.
     if (response.status === 401 && attempt === 0) return request<T>(path, init, 1);

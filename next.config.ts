@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Proxy-aware fetch for Microsoft Graph (lib/microsoft.ts); Node-only, so not bundled.
+  serverExternalPackages: ["undici"],
   async headers() {
     return [
       {
