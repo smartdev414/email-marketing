@@ -30,9 +30,10 @@ export class MailboxConnectionError extends Error {
 }
 
 /**
- * Delegated Microsoft Graph scopes. `Mail.Send` sends campaign mail; `Mail.Read`
- * reads conversations back for replies and bounce notices; `offline_access`
- * is what makes Microsoft return a refresh token.
+ * Delegated Microsoft Graph scopes. Every send creates a draft first (to learn
+ * the message and conversation ids), which needs `Mail.ReadWrite`; `Mail.Send`
+ * sends it. `Mail.ReadWrite` also covers reading replies and bounce notices.
+ * `offline_access` is what makes Microsoft return a refresh token.
  */
 export const MICROSOFT_SCOPES = [
   "openid",
@@ -41,13 +42,13 @@ export const MICROSOFT_SCOPES = [
   "offline_access",
   "User.Read",
   "Mail.Send",
-  "Mail.Read",
+  "Mail.ReadWrite",
 ].join(" ");
 
 /**
  * Microsoft reports Graph scopes either bare (`Mail.Send`) or fully qualified
- * (`https://graph.microsoft.com/Mail.Send`), in any case. `Mail.ReadWrite`
- * also covers reading.
+ * (`https://graph.microsoft.com/Mail.Send`), in any case. Sending needs
+ * `Mail.ReadWrite` too, because each email starts as a draft.
  */
 export function outlookCapabilities(scope: string | null | undefined) {
   const granted = new Set(
@@ -58,7 +59,7 @@ export function outlookCapabilities(scope: string | null | undefined) {
   );
 
   return {
-    canSend: granted.has("mail.send"),
+    canSend: granted.has("mail.send") && granted.has("mail.readwrite"),
     canRead: granted.has("mail.read") || granted.has("mail.readwrite"),
   };
 }
@@ -91,12 +92,14 @@ export async function hasMailboxAccess(userId: string) {
 
 /**
  * Google and Microsoft both answer `invalid_grant` once a refresh token is
- * revoked or expired; Microsoft adds AADSTS codes for the same thing. The
- * mailbox has to be reconnected — retrying will not help.
+ * revoked or expired; Microsoft adds AADSTS codes for the same thing, and
+ * Graph answers `ErrorAccessDenied` when the grant lacks a permission. The
+ * mailbox has to be reconnected — retrying will not help, and the recipient
+ * is not at fault.
  */
 export function isRevokedGrant(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /invalid_grant|invalid_client|unauthorized_client|interaction_required|AADSTS(50173|50076|65001|70000|70008|700082|700084)/i.test(
+  return /invalid_grant|invalid_client|unauthorized_client|interaction_required|AADSTS(50173|50076|65001|70000|70008|700082|700084)|Outlook 40[13] (ErrorAccessDenied|InvalidAuthenticationToken)/i.test(
     message,
   );
 }

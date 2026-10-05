@@ -122,7 +122,8 @@ Outlook.com and Microsoft 365 mailboxes connect through Microsoft Graph.
    `AUTH_MICROSOFT_SECRET`, and the *Application (client) ID* into
    `AUTH_MICROSOFT_ID`. Secrets expire — note the date.
 4. **API permissions → Microsoft Graph → Delegated:** `openid`, `profile`,
-   `email`, `offline_access`, `User.Read`, `Mail.Send`, `Mail.Read`.
+   `email`, `offline_access`, `User.Read`, `Mail.Send`, `Mail.ReadWrite`.
+   (`Mail.ReadWrite` is required: every email is created as a draft, then sent.)
 
 No Microsoft review is needed to start. Some work tenants only let users
 approve apps from a verified publisher; for those, complete
