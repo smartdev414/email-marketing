@@ -46,6 +46,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             }(window,document,"script","https://t.whop.tw","whop");
             whop.setScope("biz_T2SNW8TCw7tb1Y");
             whop.track("page");
+            whop.track("lead");
+            whop.track("view_content");
           `}
         </Script>
       </head>
