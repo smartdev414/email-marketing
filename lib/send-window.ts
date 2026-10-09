@@ -8,7 +8,7 @@ export const SEND_TIMEZONE = process.env.SEND_TIMEZONE ?? "America/New_York";
 
 /** Local hours, 24h clock: sending runs from START up to (not including) END. */
 const SEND_START_HOUR = Number(process.env.SEND_START_HOUR ?? 9);
-const SEND_END_HOUR = Number(process.env.SEND_END_HOUR ?? 17);
+const SEND_END_HOUR = Number(process.env.SEND_END_HOUR ?? 20);
 
 /** 0 = Sunday … 6 = Saturday. */
 const SEND_DAYS = (process.env.SEND_DAYS ?? "1,2,3,4,5").split(",").map(Number);
@@ -56,7 +56,7 @@ export function startOfSendDay(date = new Date()) {
   return new Date(Date.UTC(year, month - 1, day) - offset);
 }
 
-/** Human description for error messages, e.g. "Mon–Fri 9:00–17:00 America/New_York". */
+/** Human description for error messages, e.g. "Mon–Fri 9:00–20:00 America/New_York". */
 export function describeSendWindow() {
   const days =
     SEND_DAYS.join(",") === "1,2,3,4,5"

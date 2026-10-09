@@ -56,7 +56,7 @@ Open <http://localhost:3000> and sign in with Google.
 | `CRON_SENDS_PER_RUN` | Emails each campaign releases per background run. Default `5`. |
 | `OPENAI_API_KEY` | Turns on AI variations on the campaign page. Leave blank to send templates as written. |
 | `OPENAI_MODEL` | Model for AI variations. Default `gpt-5-nano`. |
-| `SEND_TIMEZONE` / `SEND_START_HOUR` / `SEND_END_HOUR` / `SEND_DAYS` | Sending window. Default `America/New_York`, `9`–`17`, `1,2,3,4,5` (Mon–Fri). Daily mailbox limits reset at midnight in this zone. |
+| `SEND_TIMEZONE` / `SEND_START_HOUR` / `SEND_END_HOUR` / `SEND_DAYS` | Sending window. Default `America/New_York`, `9`–`20` (9:00 AM–8:00 PM), `1,2,3,4,5` (Mon–Fri). Daily mailbox limits reset at midnight in this zone. |
 
 ---
 
@@ -232,7 +232,7 @@ Once a campaign is started (first "Send next batch" click, or Resume), it keeps
 sending on its own: `/api/cron/campaigns` releases `CRON_SENDS_PER_RUN` emails
 per sending campaign on every call, still bounded by each mailbox's daily limit.
 Pause the campaign to stop it. Nothing — manual or background — goes out
-outside the sending window (weekdays 9:00–17:00 US Eastern by default).
+outside the sending window (weekdays 9:00–20:00 US Eastern by default).
 
 `.github/workflows/campaign-sender.yml` calls the endpoint every 10 minutes
 (Vercel Hobby only allows daily crons). Add two repository secrets for it:
