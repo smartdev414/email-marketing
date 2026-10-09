@@ -77,12 +77,13 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       : {}),
   };
 
-  const [campaigns, templates, mailboxes, campaignMailboxes] = await Promise.all([
+  const [campaigns, templates, mailboxes, campaignMailboxes, lists] = await Promise.all([
     prisma.campaign.findMany({
       where,
       orderBy: { createdAt: sort === "oldest" ? "asc" : "desc" },
       include: {
         template: { select: { name: true } },
+        list: { select: { name: true } },
         senders: { select: { id: true, email: true }, orderBy: { createdAt: "asc" } },
         _count: { select: { recipients: true } },
       },
@@ -113,7 +114,18 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       orderBy: { email: "asc" },
       select: { id: true, email: true },
     }),
+    // Contact lists the create dialog can draw an audience from.
+    prisma.contactList.findMany({
+      orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, _count: { select: { members: true } } },
+    }),
   ]);
+
+  const listOptions = lists.map((list) => ({
+    id: list.id,
+    name: list.name,
+    size: list._count.members,
+  }));
 
   const usable = mailboxes.filter(mailboxReady);
   const quotas = await mailboxQuotas(usable);
@@ -178,7 +190,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
         title="Campaigns"
         description="Each campaign draws a random audience from your contacts and rotates sending across the mailboxes you pick."
       >
-        <CreateCampaignDialog templates={templates} senders={senders} />
+        <CreateCampaignDialog templates={templates} senders={senders} lists={listOptions} />
       </PageHeader>
 
       {templates.length === 0 ? (
@@ -197,7 +209,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
           title="No campaigns yet"
           description="Create a campaign, review the audience it drew, then release the first batch."
         >
-          <CreateCampaignDialog templates={templates} senders={senders} />
+          <CreateCampaignDialog templates={templates} senders={senders} lists={listOptions} />
         </EmptyState>
       ) : (
         <>
@@ -278,6 +290,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                             </Link>
                             <p className="text-muted-foreground text-xs">
                               {campaign.template.name} ·{" "}
+                              {campaign.list ? `${campaign.list.name} · ` : ""}
                               {campaign.senders.length > 1
                                 ? `${campaign.senders.length} mailboxes`
                                 : (campaign.senders[0]?.email ?? "No mailbox")}

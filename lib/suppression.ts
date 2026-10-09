@@ -25,6 +25,31 @@ export async function isSuppressed(email: string) {
   return Boolean(hit);
 }
 
+/** The addresses among `emails` that are blocked, in one query — for imports. */
+export async function suppressedAmong(emails: string[]) {
+  const normalized = [...new Set(emails.map((email) => email.toLowerCase().trim()))];
+  const domains = [...new Set(normalized.map((email) => emailParts(email).domain))];
+
+  const hits = await prisma.suppression.findMany({
+    where: {
+      OR: [
+        { type: "EMAIL", value: { in: normalized } },
+        { type: "DOMAIN", value: { in: domains } },
+      ],
+    },
+    select: { type: true, value: true },
+  });
+
+  const blockedEmails = new Set(hits.filter((hit) => hit.type === "EMAIL").map((hit) => hit.value));
+  const blockedDomains = new Set(hits.filter((hit) => hit.type === "DOMAIN").map((hit) => hit.value));
+
+  return new Set(
+    normalized.filter(
+      (email) => blockedEmails.has(email) || blockedDomains.has(emailParts(email).domain),
+    ),
+  );
+}
+
 export async function suppress(
   email: string,
   reason: string,

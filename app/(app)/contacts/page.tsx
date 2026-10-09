@@ -7,8 +7,10 @@ import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { StatusBadge } from "@/components/status-badge";
+import { UrlSelect } from "@/components/url-select";
 import { ContactDialog } from "@/components/contacts/contact-dialog";
 import { ContactRowActions } from "@/components/contacts/contact-row-actions";
+import { DeleteListButton } from "@/components/contacts/delete-list-button";
 import { ImportContactsDialog } from "@/components/contacts/import-contacts-dialog";
 import { WarehouseImportDialog } from "@/components/contacts/warehouse-import-dialog";
 import { Button } from "@/components/ui/button";
@@ -42,10 +44,12 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
   const params = await searchParams;
   const query = typeof params.q === "string" ? params.q.trim() : "";
   const status = typeof params.status === "string" ? params.status : "all";
+  const listId = typeof params.list === "string" ? params.list : "all";
   const page = parsePage(params.page);
 
   const where = {
     ...(status !== "all" ? { status: status as ContactStatus } : {}),
+    ...(listId !== "all" ? { lists: { some: { listId } } } : {}),
     ...(query
       ? {
           OR: [
@@ -58,7 +62,7 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
       : {}),
   };
 
-  const [contacts, total, warehouse] = await Promise.all([
+  const [contacts, total, warehouse, lists] = await Promise.all([
     prisma.contact.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -67,13 +71,26 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
     }),
     prisma.contact.count({ where }),
     getWarehouseStats(),
+    prisma.contactList.findMany({
+      orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, _count: { select: { members: true } } },
+    }),
   ]);
+
+  const listOptions = lists.map((list) => ({
+    id: list.id,
+    name: list.name,
+    size: list._count.members,
+  }));
+  const currentList = listOptions.find((list) => list.id === listId);
+  const filtered = Boolean(query) || status !== "all" || listId !== "all";
 
 
   function filterHref(value: string) {
     const search = new URLSearchParams();
     if (query) search.set("q", query);
     if (value !== "all") search.set("status", value);
+    if (listId !== "all") search.set("list", listId);
     return `/contacts?${search.toString()}`;
   }
 
@@ -87,7 +104,7 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
           estimatedRows={warehouse.estimatedRows}
           imported={warehouse.imported}
         />
-        <ImportContactsDialog />
+        <ImportContactsDialog lists={listOptions} />
         <ContactDialog />
       </PageHeader>
 
@@ -105,6 +122,23 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
             </Button>
           ))}
         </div>
+        {listOptions.length > 0 ? (
+          <UrlSelect
+            param="list"
+            label="Filter by list"
+            defaultValue="all"
+            searchable
+            searchPlaceholder="Search lists…"
+            options={[
+              { value: "all", label: "All lists" },
+              ...listOptions.map((list) => ({
+                value: list.id,
+                label: `${list.name} (${list.size.toLocaleString()})`,
+              })),
+            ]}
+          />
+        ) : null}
+        {currentList ? <DeleteListButton list={currentList} /> : null}
         <p className="text-muted-foreground ml-auto text-sm tabular-nums">
           {total.toLocaleString()} contact{total === 1 ? "" : "s"}
         </p>
@@ -116,11 +150,11 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
             <div className="p-6">
               <EmptyState
                 icon={Users}
-                title={query || status !== "all" ? "No matching contacts" : "No contacts yet"}
+                title={filtered ? "No matching contacts" : "No contacts yet"}
                 description={
-                  query || status !== "all"
+                  filtered
                     ? "Try a different search or filter."
-                    : "Pull a batch out of the hl_contacts warehouse, import a CSV, or add contacts one at a time."
+                    : "Import a CSV or Excel file, pull a batch out of the hl_contacts warehouse, or add contacts one at a time."
                 }
               >
                 <WarehouseImportDialog

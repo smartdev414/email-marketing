@@ -45,13 +45,18 @@ type Props = {
   templates: { id: string; name: string; subject: string }[];
   /** The current user's active, connected mailboxes. */
   senders: SenderOption[];
+  /** Contact lists the audience can be drawn from. */
+  lists?: { id: string; name: string; size: number }[];
 };
 
-export function CreateCampaignDialog({ templates, senders }: Props) {
+const ALL_CONTACTS = "__all";
+
+export function CreateCampaignDialog({ templates, senders, lists = [] }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [eligible, setEligible] = useState<number | null>(null);
+  // Tagged with the audience it was counted for, so a stale count never shows.
+  const [counted, setCounted] = useState<{ key: string; count: number } | null>(null);
 
   const [values, setValues] = useState<CampaignInput>({
     name: "",
@@ -64,6 +69,7 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
     trackClicks: false,
     // Nothing pre-ticked: the sender list is a deliberate choice.
     senderIds: [],
+    listId: null,
   });
 
   // Show the size of the pool the random draw will pick from.
@@ -71,14 +77,18 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
     if (!open) return;
 
     let cancelled = false;
-    void countEligibleContacts(values.excludeContacted ?? true).then((count) => {
-      if (!cancelled) setEligible(count);
+    const key = `${values.excludeContacted ?? true}|${values.listId ?? ""}`;
+    void countEligibleContacts(values.excludeContacted ?? true, values.listId).then((count) => {
+      if (!cancelled) setCounted({ key, count });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [open, values.excludeContacted]);
+  }, [open, values.excludeContacted, values.listId]);
+
+  const audienceKey = `${values.excludeContacted ?? true}|${values.listId ?? ""}`;
+  const eligible = counted?.key === audienceKey ? counted.count : null;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -110,8 +120,8 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
           <DialogHeader>
             <DialogTitle>New campaign</DialogTitle>
             <DialogDescription>
-              Pick a template and how many contacts to draw. The audience is sampled at random
-              from your active contacts.
+              Pick a template, an audience and how many contacts to draw. The audience is
+              sampled at random from the active contacts in it.
             </DialogDescription>
           </DialogHeader>
 
@@ -170,6 +180,36 @@ export function CreateCampaignDialog({ templates, senders }: Props) {
                   onChange={(senderIds) => setValues((current) => ({ ...current, senderIds }))}
                 />
               )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="audience">Audience</Label>
+              <Select
+                value={values.listId ?? ALL_CONTACTS}
+                onValueChange={(value) =>
+                  setValues((current) => ({
+                    ...current,
+                    listId: value === ALL_CONTACTS ? null : value,
+                  }))
+                }
+              >
+                <SelectTrigger id="audience">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_CONTACTS}>All contacts</SelectItem>
+                  {lists.map((list) => (
+                    <SelectItem key={list.id} value={list.id}>
+                      {list.name} ({list.size.toLocaleString()})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {lists.length === 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  Import a file on the Contacts page to send to a specific list.
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

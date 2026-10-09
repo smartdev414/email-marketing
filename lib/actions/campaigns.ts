@@ -33,6 +33,8 @@ const campaignSchema = z.object({
   batchSize: z.number().int().min(1).max(500).default(50),
   /** Skip contacts who have already been emailed by any campaign. */
   excludeContacted: z.boolean().default(true),
+  /** Draw only from this contact list; empty means all contacts. */
+  listId: z.string().min(1).nullish(),
   trackOpens: z.boolean().default(true),
   trackClicks: z.boolean().default(true),
   /** Connected mailboxes the campaign rotates through. */
@@ -45,13 +47,14 @@ export type CampaignInput = z.input<typeof campaignSchema>;
  * Counts how many contacts are eligible right now, so the campaign form can
  * show the size of the pool before anyone commits to a send.
  */
-export async function countEligibleContacts(excludeContacted = true) {
+export async function countEligibleContacts(excludeContacted = true, listId?: string | null) {
   await requireUser();
 
   return prisma.contact.count({
     where: {
       status: "ACTIVE",
       ...(excludeContacted ? { recipients: { none: {} } } : {}),
+      ...(listId ? { lists: { some: { listId } } } : {}),
     },
   });
 }
@@ -60,8 +63,17 @@ export async function countEligibleContacts(excludeContacted = true) {
  * Draws an audience at random. `ORDER BY random()` runs the sampling inside
  * Postgres so we never pull the whole contact table into the app.
  */
-async function drawAudience(audienceSize: number, excludeContacted: boolean) {
+async function drawAudience(
+  audienceSize: number,
+  excludeContacted: boolean,
+  listId?: string | null,
+) {
   const conditions = [Prisma.sql`c."status" = 'ACTIVE'`];
+  if (listId) {
+    conditions.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "ContactListMember" m WHERE m."contactId" = c."id" AND m."listId" = ${listId})`,
+    );
+  }
   if (excludeContacted) {
     conditions.push(
       Prisma.sql`NOT EXISTS (SELECT 1 FROM "CampaignRecipient" r WHERE r."contactId" = c."id")`,
@@ -98,6 +110,7 @@ export async function createCampaign(input: CampaignInput): Promise<
     trackOpens,
     trackClicks,
     senderIds,
+    listId,
   } = parsed.data;
 
   // Only the creator's own, working mailboxes can be used as senders — replies
@@ -114,10 +127,19 @@ export async function createCampaign(input: CampaignInput): Promise<
   const template = await prisma.template.findUnique({ where: { id: templateId } });
   if (!template) return { ok: false, error: "Template not found" };
 
-  const picked = await drawAudience(audienceSize, excludeContacted);
+  if (listId && !(await prisma.contactList.count({ where: { id: listId } }))) {
+    return { ok: false, error: "That contact list no longer exists." };
+  }
+
+  const picked = await drawAudience(audienceSize, excludeContacted, listId);
 
   if (picked.length === 0) {
-    return { ok: false, error: "No contacts match that audience — import contacts first." };
+    return {
+      ok: false,
+      error: listId
+        ? "No one in that list can be emailed — they were all contacted already or are not active."
+        : "No contacts match that audience — import contacts first.",
+    };
   }
 
   const campaign = await prisma.campaign.create({
@@ -125,6 +147,7 @@ export async function createCampaign(input: CampaignInput): Promise<
       name,
       description: description || null,
       templateId,
+      listId: listId ?? null,
       fromUserId: user.id,
       batchSize,
       trackOpens,
@@ -235,9 +258,14 @@ export async function duplicateCampaign(
     return { ok: false, error: "None of this campaign's mailboxes can send — reconnect them first." };
   }
 
-  const picked = await drawAudience(Math.max(1, source._count.recipients), true);
+  const picked = await drawAudience(Math.max(1, source._count.recipients), true, source.listId);
   if (picked.length === 0) {
-    return { ok: false, error: "Every active contact has already been emailed — import more first." };
+    return {
+      ok: false,
+      error: source.listId
+        ? "Everyone active in this campaign's list has already been emailed — import more first."
+        : "Every active contact has already been emailed — import more first.",
+    };
   }
 
   const copy = await prisma.campaign.create({
@@ -245,6 +273,7 @@ export async function duplicateCampaign(
       name: `${source.name} (copy)`.slice(0, 120),
       description: source.description,
       templateId: source.templateId,
+      listId: source.listId,
       fromUserId: source.fromUserId,
       batchSize: source.batchSize,
       trackOpens: source.trackOpens,

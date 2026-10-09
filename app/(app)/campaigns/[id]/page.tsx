@@ -38,6 +38,7 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
     where: { id },
     include: {
       template: true,
+      list: { select: { id: true, name: true } },
       fromUser: { select: { name: true, email: true } },
       senders: { select: { id: true, email: true, isActive: true }, orderBy: { createdAt: "asc" } },
       variants: { orderBy: { createdAt: "asc" } },
@@ -152,6 +153,9 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
         ) : null}
         <Badge variant="secondary" className="font-normal">
           {campaign.template.name}
+        </Badge>
+        <Badge variant="outline" className="font-normal">
+          {campaign.list ? `List: ${campaign.list.name}` : "All contacts"}
         </Badge>
         {campaign.senders.length === 0 ? (
           <Badge variant="destructive" className="font-normal">
