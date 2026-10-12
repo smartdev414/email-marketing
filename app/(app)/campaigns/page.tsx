@@ -152,6 +152,13 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
   });
 
   const counts = new Map(grouped.map((row) => [row.campaignId, row._count]));
+  // Still-queued recipients, so the Edit dialog knows how far the audience can shrink.
+  const pendingGroups = await prisma.campaignRecipient.groupBy({
+    by: ["campaignId"],
+    where: { status: "PENDING" },
+    _count: { _all: true },
+  });
+  const pendingOf = new Map(pendingGroups.map((row) => [row.campaignId, row._count._all]));
   const lastSent = new Map(grouped.map((row) => [row.campaignId, row._max.sentAt]));
 
   // Result-based sorts need the counters above, so they happen here.
@@ -331,6 +338,9 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                                 name: campaign.name,
                                 templateId: campaign.templateId,
                                 templateName: campaign.template.name,
+                                audienceSize: campaign._count.recipients,
+                                processed:
+                                  campaign._count.recipients - (pendingOf.get(campaign.id) ?? 0),
                                 batchSize: campaign.batchSize,
                                 trackOpens: campaign.trackOpens,
                                 trackClicks: campaign.trackClicks,

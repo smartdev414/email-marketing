@@ -31,6 +31,8 @@ export type EditableCampaign = CampaignUpdateInput & {
   id: string;
   /** Shown even if archived, so the current choice is never blank. */
   templateName: string;
+  /** Recipients already sent or skipped: the audience cannot shrink below this. */
+  processed: number;
 };
 
 type Props = {
@@ -45,7 +47,7 @@ type Props = {
 export function EditCampaignDialog({ campaign, templates, senders, open, onOpenChange }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const { id, templateName, ...initial } = campaign;
+  const { id, templateName, processed, ...initial } = campaign;
   const [values, setValues] = useState<CampaignUpdateInput>(initial);
 
   const templateOptions = templates.some((template) => template.id === initial.templateId)
@@ -58,7 +60,8 @@ export function EditCampaignDialog({ campaign, templates, senders, open, onOpenC
     startTransition(async () => {
       const result = await updateCampaign(id, values);
       if (result.ok) {
-        toast.success("Campaign updated");
+        if (result.notice) toast.warning(result.notice);
+        else toast.success("Campaign updated");
         onOpenChange(false);
         router.refresh();
       } else {
@@ -74,7 +77,7 @@ export function EditCampaignDialog({ campaign, templates, senders, open, onOpenC
           <DialogHeader>
             <DialogTitle>Edit campaign</DialogTitle>
             <DialogDescription>
-              Changes apply to emails that have not gone out yet. The audience stays as drawn.
+              Changes apply to emails that have not gone out yet.
             </DialogDescription>
           </DialogHeader>
 
@@ -128,19 +131,47 @@ export function EditCampaignDialog({ campaign, templates, senders, open, onOpenC
               )}
             </div>
 
-            <div className="grid gap-2 sm:max-w-[50%]">
-              <Label htmlFor={`edit-batch-${id}`}>Emails per batch</Label>
-              <Input
-                id={`edit-batch-${id}`}
-                type="number"
-                min={1}
-                max={500}
-                required
-                value={values.batchSize}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, batchSize: Number(event.target.value) }))
-                }
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor={`edit-audience-${id}`}>How many contacts</Label>
+                <Input
+                  id={`edit-audience-${id}`}
+                  type="number"
+                  min={Math.max(1, processed)}
+                  max={5000}
+                  required
+                  value={values.audienceSize}
+                  onChange={(event) =>
+                    setValues((current) => ({
+                      ...current,
+                      audienceSize: Number(event.target.value),
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor={`edit-batch-${id}`}>Emails per batch</Label>
+                <Input
+                  id={`edit-batch-${id}`}
+                  type="number"
+                  min={1}
+                  max={500}
+                  required
+                  value={values.batchSize}
+                  onChange={(event) =>
+                    setValues((current) => ({ ...current, batchSize: Number(event.target.value) }))
+                  }
+                />
+              </div>
+
+              <p className="text-muted-foreground -mt-2 text-xs sm:col-span-2">
+                {processed > 0
+                  ? `${processed} already emailed or skipped, so it can't go lower. `
+                  : ""}
+                More contacts are drawn at random from the same audience, skipping anyone already
+                emailed; fewer removes contacts still waiting to be sent.
+              </p>
             </div>
 
             <div className="space-y-3 rounded-lg border p-3">

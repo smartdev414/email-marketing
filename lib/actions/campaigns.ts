@@ -170,6 +170,7 @@ export async function createCampaign(input: CampaignInput): Promise<
 const campaignUpdateSchema = campaignSchema.pick({
   name: true,
   templateId: true,
+  audienceSize: true,
   batchSize: true,
   trackOpens: true,
   trackClicks: true,
@@ -179,26 +180,55 @@ const campaignUpdateSchema = campaignSchema.pick({
 export type CampaignUpdateInput = z.input<typeof campaignUpdateSchema>;
 
 /**
- * Edits a campaign's settings. The audience is fixed once drawn; template,
- * mailbox and batch changes apply to the emails that have not gone out yet.
+ * Edits a campaign's settings. Template, mailbox and batch changes apply to
+ * the emails that have not gone out yet. A larger audience draws more contacts
+ * at random from the same list (skipping anyone already emailed); a smaller
+ * one drops recipients that are still waiting, never ones already sent.
  */
 export async function updateCampaign(
   id: string,
   input: CampaignUpdateInput,
-): Promise<ActionResult> {
+): Promise<{ ok: true; notice?: string } | { ok: false; error: string }> {
   await requireUser();
 
   const parsed = campaignUpdateSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid campaign" };
   }
-  const { senderIds, ...fields } = parsed.data;
+  const { senderIds, audienceSize, ...fields } = parsed.data;
 
   const campaign = await prisma.campaign.findUnique({
     where: { id },
-    select: { fromUserId: true, templateId: true },
+    select: {
+      fromUserId: true,
+      templateId: true,
+      listId: true,
+      status: true,
+      startedAt: true,
+      sendLockedUntil: true,
+    },
   });
   if (!campaign) return { ok: false, error: "Campaign not found" };
+
+  const [total, pending] = await Promise.all([
+    prisma.campaignRecipient.count({ where: { campaignId: id } }),
+    prisma.campaignRecipient.count({ where: { campaignId: id, status: "PENDING" } }),
+  ]);
+  const processed = total - pending;
+  if (audienceSize < processed) {
+    return {
+      ok: false,
+      error: `${processed} contacts were already emailed or skipped — the audience can't be smaller.`,
+    };
+  }
+  // The batch in flight holds recipients it is about to send; removing one
+  // under it would break that send.
+  if (audienceSize < total && campaign.sendLockedUntil && campaign.sendLockedUntil > new Date()) {
+    return {
+      ok: false,
+      error: "A batch is going out right now. Try shrinking the audience in a minute.",
+    };
+  }
 
   // Same rule as creation: replies land in the owner's own mailboxes.
   const senders = await prisma.emailAccount.findMany({
@@ -226,9 +256,51 @@ export async function updateCampaign(
     },
   });
 
+  let notice: string | undefined;
+
+  if (audienceSize > total) {
+    const wanted = audienceSize - total;
+    const picked = await drawAudience(wanted, true, campaign.listId);
+
+    if (picked.length > 0) {
+      await prisma.campaignRecipient.createMany({
+        data: picked.map((contact) => ({
+          campaignId: id,
+          contactId: contact.id,
+          assignedToId: campaign.fromUserId,
+        })),
+      });
+      // A finished campaign has new people to email, so it picks up again.
+      if (campaign.status === "COMPLETED") {
+        await prisma.campaign.update({
+          where: { id },
+          data: { status: campaign.startedAt ? "SENDING" : "DRAFT", completedAt: null },
+        });
+      }
+    }
+
+    if (picked.length < wanted) {
+      notice =
+        picked.length === 0
+          ? "Campaign updated, but no more contacts were available to add."
+          : `Campaign updated — only ${picked.length} more contacts were available.`;
+    }
+  } else if (audienceSize < total) {
+    // The sender works through the queue oldest first, so drop the newest.
+    const dropped = await prisma.campaignRecipient.findMany({
+      where: { campaignId: id, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+      take: total - audienceSize,
+      select: { id: true },
+    });
+    await prisma.campaignRecipient.deleteMany({
+      where: { id: { in: dropped.map((recipient) => recipient.id) }, status: "PENDING" },
+    });
+  }
+
   revalidatePath(`/campaigns/${id}`);
   revalidatePath("/campaigns");
-  return { ok: true };
+  return { ok: true, notice };
 }
 
 /**

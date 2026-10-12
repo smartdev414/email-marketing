@@ -86,7 +86,9 @@ export function SenderPicker({ idPrefix, senders, value, onChange }: Props) {
                 key={sender.id}
                 htmlFor={id}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-2 py-1.5",
+                  // `relative` keeps the checkbox's hidden form input inside this row;
+                  // otherwise rows scrolled out of the list stretch the whole dialog.
+                  "relative flex items-center gap-3 rounded-md px-2 py-1.5",
                   disabled ? "cursor-not-allowed opacity-50" : "hover:bg-muted/50 cursor-pointer",
                 )}
               >

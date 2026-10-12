@@ -127,6 +127,8 @@ export default async function CampaignPage({ params }: PageProps<"/campaigns/[id
             name: campaign.name,
             templateId: campaign.templateId,
             templateName: campaign.template.name,
+            audienceSize: stats.total,
+            processed: stats.total - stats.pending,
             batchSize: campaign.batchSize,
             trackOpens: campaign.trackOpens,
             trackClicks: campaign.trackClicks,
