@@ -47,7 +47,7 @@ export default async function DashboardPage() {
             <div className="space-y-1">
               <p className="text-sm font-medium">No sending mailbox connected</p>
               <p className="text-muted-foreground text-sm">
-                Connect one or more Gmail or Outlook accounts before you send a campaign. Campaigns rotate
+                Connect one or more Gmail, Outlook or other email accounts before you send a campaign. Campaigns rotate
                 between them to keep each inbox&rsquo;s volume low.
               </p>
             </div>

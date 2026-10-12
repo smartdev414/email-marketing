@@ -11,6 +11,12 @@ import {
   outlookThreadReplies,
   sendOutlook,
 } from "@/lib/mail/outlook";
+import {
+  sendSmtp,
+  smtpBouncedAddresses,
+  smtpRecentInboxThreadIds,
+  smtpThreadReplies,
+} from "@/lib/mail/smtp";
 import type { MailboxRef, SendOptions, SendResult, ThreadReply } from "@/lib/mail/types";
 import { MailboxConnectionError, providerOf } from "@/lib/mailbox";
 import { outlookProfileName } from "@/lib/microsoft";
@@ -18,8 +24,8 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * One entry point for every mailbox, whatever its provider. Callers pass a
- * mailbox id; this looks up whether it is Gmail or Outlook and hands the call
- * to `lib/mail/gmail.ts` or `lib/mail/outlook.ts`.
+ * mailbox id; this looks up whether it is Gmail, Outlook or SMTP and hands the
+ * call to `lib/mail/gmail.ts`, `lib/mail/outlook.ts` or `lib/mail/smtp.ts`.
  */
 
 export type { SendResult, ThreadReply };
@@ -31,7 +37,7 @@ async function findMailbox(emailAccountId: string) {
   });
   if (!mailbox) throw new MailboxConnectionError();
   const ref: MailboxRef = { id: mailbox.id, email: mailbox.email };
-  return { mailbox: ref, outlook: providerOf(mailbox) === "microsoft" };
+  return { mailbox: ref, provider: providerOf(mailbox) };
 }
 
 export async function sendEmail({
@@ -41,8 +47,9 @@ export async function sendEmail({
   /** Connected mailbox (`EmailAccount.id`) the email goes out from. */
   emailAccountId: string;
 }): Promise<SendResult> {
-  const { mailbox, outlook } = await findMailbox(emailAccountId);
-  return outlook ? sendOutlook(mailbox, options) : sendGmail(mailbox, options);
+  const { mailbox, provider } = await findMailbox(emailAccountId);
+  const send = { google: sendGmail, microsoft: sendOutlook, smtp: sendSmtp }[provider];
+  return send(mailbox, options);
 }
 
 /**
@@ -53,8 +60,13 @@ export async function fetchThreadReplies(
   emailAccountId: string,
   threadId: string,
 ): Promise<ThreadReply[]> {
-  const { mailbox, outlook } = await findMailbox(emailAccountId);
-  return outlook ? outlookThreadReplies(mailbox, threadId) : gmailThreadReplies(mailbox, threadId);
+  const { mailbox, provider } = await findMailbox(emailAccountId);
+  const replies = {
+    google: gmailThreadReplies,
+    microsoft: outlookThreadReplies,
+    smtp: smtpThreadReplies,
+  }[provider];
+  return replies(mailbox, threadId);
 }
 
 /**
@@ -63,16 +75,24 @@ export async function fetchThreadReplies(
  * actually have something new instead of every thread it ever sent.
  */
 export async function fetchRecentInboxThreadIds(emailAccountId: string, days = 3) {
-  const { mailbox, outlook } = await findMailbox(emailAccountId);
-  return outlook
-    ? outlookRecentInboxThreadIds(mailbox, days)
-    : gmailRecentInboxThreadIds(mailbox, days);
+  const { mailbox, provider } = await findMailbox(emailAccountId);
+  const recent = {
+    google: gmailRecentInboxThreadIds,
+    microsoft: outlookRecentInboxThreadIds,
+    smtp: smtpRecentInboxThreadIds,
+  }[provider];
+  return recent(mailbox, days);
 }
 
 /** Failed recipient addresses from recent delivery-failure notices. */
 export async function fetchBouncedAddresses(emailAccountId: string, days = 14) {
-  const { mailbox, outlook } = await findMailbox(emailAccountId);
-  return outlook ? outlookBouncedAddresses(mailbox, days) : gmailBouncedAddresses(mailbox, days);
+  const { mailbox, provider } = await findMailbox(emailAccountId);
+  const bounced = {
+    google: gmailBouncedAddresses,
+    microsoft: outlookBouncedAddresses,
+    smtp: smtpBouncedAddresses,
+  }[provider];
+  return bounced(mailbox, days);
 }
 
 /**
@@ -86,6 +106,8 @@ export async function mailboxSenderName(mailbox: {
   fromName: string | null;
 }) {
   if (mailbox.fromName) return mailbox.fromName;
+  // SMTP has no profile to read; its name is whatever was typed when connecting.
+  if (providerOf(mailbox) === "smtp") return null;
 
   try {
     const name =

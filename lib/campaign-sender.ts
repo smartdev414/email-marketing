@@ -1,7 +1,13 @@
 import { revalidatePath } from "next/cache";
 
 import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
-import { isRevokedGrant, MailboxConnectionError, mailboxReady, providerLabel } from "@/lib/mailbox";
+import {
+  isRevokedGrant,
+  MailboxBusyError,
+  MailboxConnectionError,
+  mailboxReady,
+  providerLabel,
+} from "@/lib/mailbox";
 import { mailboxSenderName, sendEmail } from "@/lib/mailer";
 import { notify, sendDayKey } from "@/lib/notifications";
 import { describeSendWindow, isWithinSendWindow } from "@/lib/send-window";
@@ -293,6 +299,14 @@ async function sendLockedBatch(
 
       sent += 1;
     } catch (error) {
+      // A server that is refusing for now (sending limit, outage) sits out the
+      // rest of this batch; the recipient stays queued for the next one.
+      if (error instanceof MailboxBusyError) {
+        slot.remaining = 0;
+        console.warn(error.message);
+        continue;
+      }
+
       // A dead mailbox is not the recipient's fault: drop the mailbox from the
       // rotation and leave the recipient queued for the next batch.
       if (error instanceof MailboxConnectionError || isRevokedGrant(error)) {

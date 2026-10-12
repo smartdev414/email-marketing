@@ -90,7 +90,7 @@ export default async function SettingsPage() {
           <CardTitle className="text-base">Sending mailboxes</CardTitle>
           <CardDescription>
             {sending.length === 0
-              ? "No mailbox is ready to send. Connect a Gmail or Outlook account on the Integrations page."
+              ? "No mailbox is ready to send. Connect a Gmail, Outlook or other email account on the Integrations page."
               : `${sending.length} mailbox${sending.length === 1 ? " is" : "es are"} ready to send. Campaigns rotate between the ones you pick.`}
           </CardDescription>
         </CardHeader>

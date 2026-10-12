@@ -2,7 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Proxy-aware fetch for Microsoft Graph (lib/microsoft.ts); Node-only, so not bundled.
-  serverExternalPackages: ["undici"],
+  // SMTP/IMAP mailboxes (lib/mail/smtp.ts) open raw sockets; Node-only as well.
+  serverExternalPackages: ["undici", "nodemailer", "imapflow", "mailparser"],
   async headers() {
     return [
       {

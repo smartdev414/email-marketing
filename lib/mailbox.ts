@@ -4,18 +4,20 @@ import { prisma } from "@/lib/prisma";
 /**
  * Provider-neutral mailbox helpers. `EmailAccount.provider` says which API a
  * mailbox talks to; everything that only needs to know "can it send?" goes
- * through here instead of the Gmail or Outlook modules.
+ * through here instead of the Gmail, Outlook or SMTP modules.
  */
 
-export type MailboxProvider = "google" | "microsoft";
+export type MailboxProvider = "google" | "microsoft" | "smtp";
 
 export const PROVIDER_LABELS: Record<MailboxProvider, string> = {
   google: "Gmail",
   microsoft: "Outlook",
+  smtp: "SMTP",
 };
 
 export function providerOf(mailbox: { provider: string }): MailboxProvider {
-  return mailbox.provider === "microsoft" ? "microsoft" : "google";
+  if (mailbox.provider === "microsoft" || mailbox.provider === "smtp") return mailbox.provider;
+  return "google";
 }
 
 export function providerLabel(mailbox: { provider: string }) {
@@ -26,6 +28,18 @@ export class MailboxConnectionError extends Error {
   constructor(message = "Mailbox is not connected. Reconnect it on the Integrations page.") {
     super(message);
     this.name = "MailboxConnectionError";
+  }
+}
+
+/**
+ * The mail server is refusing for now (a 4xx answer such as a sending limit,
+ * or no connection) rather than refusing the recipient. The email should
+ * wait for a later batch instead of being marked failed.
+ */
+export class MailboxBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MailboxBusyError";
   }
 }
 
@@ -64,20 +78,37 @@ export function outlookCapabilities(scope: string | null | undefined) {
   };
 }
 
+/**
+ * SMTP mailboxes have no OAuth scopes; connecting one stores `SMTP_SCOPE`
+ * once both servers accepted the login, and a disconnect clears it.
+ */
+export const SMTP_SCOPE = "smtp imap";
+
+function smtpCapabilities(scope: string | null | undefined) {
+  const granted = new Set((scope ?? "").split(/\s+/));
+  return { canSend: granted.has("smtp"), canRead: granted.has("imap") };
+}
+
 export function mailboxCapabilities(mailbox: { provider: string; scope: string | null }) {
-  return providerOf(mailbox) === "microsoft"
+  const provider = providerOf(mailbox);
+  if (provider === "smtp") return smtpCapabilities(mailbox.scope);
+  return provider === "microsoft"
     ? outlookCapabilities(mailbox.scope)
     : gmailCapabilities(mailbox.scope);
 }
 
-/** True when a stored grant lets us send and read, and can be refreshed. */
+/**
+ * True when a stored grant lets us send and read, and can be refreshed. SMTP
+ * mailboxes log in with a password, so there is nothing to refresh.
+ */
 export function mailboxReady(mailbox: {
   provider: string;
   scope: string | null;
   refreshToken: string | null;
 }) {
   const { canSend, canRead } = mailboxCapabilities(mailbox);
-  return canSend && canRead && Boolean(mailbox.refreshToken);
+  const renewable = providerOf(mailbox) === "smtp" || Boolean(mailbox.refreshToken);
+  return canSend && canRead && renewable;
 }
 
 /** True when the team member has at least one mailbox ready to send. */

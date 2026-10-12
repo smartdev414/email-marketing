@@ -51,10 +51,12 @@ model User {
 model EmailAccount {
   id           String   @id @default(cuid())
   userId       String
+  /// "google", "microsoft" or "smtp" (any other provider, over SMTP + IMAP).
   provider     String   @default("google")
   email        String
   /// Display name used in the From header; falls back to the owner's name.
   fromName     String?
+  /// OAuth access token; for "smtp" mailboxes, the encrypted mailbox password.
   accessToken  String?  @db.Text
   refreshToken String?  @db.Text
   /// Unix seconds, same convention as `Account.expires_at`.
@@ -64,6 +66,11 @@ model EmailAccount {
   isActive     Boolean  @default(true)
   /// Per-mailbox override of DAILY_SEND_LIMIT, handy while warming a new inbox.
   dailyLimit   Int?
+  /// Server settings for "smtp" mailboxes; the login is always `email`.
+  smtpHost     String?
+  smtpPort     Int?
+  imapHost     String?
+  imapPort     Int?
   lastError    String?  @db.Text
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

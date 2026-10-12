@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { auth } from "@/auth";
-import { outlookCapabilities } from "@/lib/mailbox";
+import { outlookCapabilities, providerLabel } from "@/lib/mailbox";
 import { MICROSOFT_STATE_COOKIE, exchangeMicrosoftCode } from "@/lib/microsoft";
 import { prisma } from "@/lib/prisma";
 import { appUrl } from "@/lib/tracking";
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (existing && existing.provider !== "microsoft") {
-    return back({ error: `${email} is already connected as a Gmail mailbox.` });
+    return back({ error: `${email} is already connected through ${providerLabel(existing)}.` });
   }
 
   const refreshToken = tokens.refresh_token ?? existing?.refreshToken ?? null;

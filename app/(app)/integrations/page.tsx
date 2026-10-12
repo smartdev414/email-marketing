@@ -6,6 +6,7 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { EmptyState } from "@/components/empty-state";
 import { MailboxActions, MailboxActiveSwitch } from "@/components/integrations/mailbox-actions";
+import { SmtpConnectDialog } from "@/components/integrations/smtp-connect-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
@@ -68,6 +69,7 @@ function ConnectButtons({ size }: { size?: "sm" }) {
           Connect Outlook
         </a>
       </Button>
+      <SmtpConnectDialog size={size} />
     </div>
   );
 }
@@ -93,6 +95,10 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
       fromName: true,
       dailyLimit: true,
       isActive: true,
+      smtpHost: true,
+      smtpPort: true,
+      imapHost: true,
+      imapPort: true,
       scope: true,
       accessToken: true,
       refreshToken: true,
@@ -158,7 +164,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
     <>
       <PageHeader
         title="Integrations"
-        description="Connect the Gmail and Outlook mailboxes your campaigns send from. Campaigns rotate between the mailboxes you pick, so no single inbox sends enough to look like spam."
+        description="Connect the Gmail, Outlook and other (SMTP) mailboxes your campaigns send from. Campaigns rotate between the mailboxes you pick, so no single inbox sends enough to look like spam."
       >
         <ConnectButtons />
       </PageHeader>
@@ -207,7 +213,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
             <EmptyState
               icon={Mail}
               title="No mailboxes connected"
-              description="Connect at least one Gmail, Google Workspace, Outlook or Microsoft 365 account before you create a campaign. Several mailboxes on different domains spread the volume best."
+              description="Connect at least one Gmail, Google Workspace, Outlook, Microsoft 365 or other SMTP mailbox (such as Namecheap Private Email) before you create a campaign. Several mailboxes on different domains spread the volume best."
             >
               <ConnectButtons size="sm" />
             </EmptyState>
@@ -270,6 +276,10 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                       dailyLimit: mailbox.dailyLimit,
                       isActive: mailbox.isActive,
                       connected: hasTokens,
+                      smtpHost: mailbox.smtpHost,
+                      smtpPort: mailbox.smtpPort,
+                      imapHost: mailbox.imapHost,
+                      imapPort: mailbox.imapPort,
                     };
 
                     return (
@@ -371,6 +381,15 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                 : "Outlook is not configured yet. Register an app in Microsoft Entra, set AUTH_MICROSOFT_ID and AUTH_MICROSOFT_SECRET, and add this redirect URI (platform: Web):"}
             </p>
             <code className="mt-2 block break-all text-xs">{microsoftRedirectUri()}</code>
+          </div>
+          <div className="bg-muted/40 rounded-md border p-3">
+            <p className="text-foreground font-medium">Other providers (SMTP)</p>
+            <p className="mt-1">
+              Use &ldquo;Connect other email&rdquo; with the mailbox&rsquo;s own email and
+              password. For Namecheap Private Email the servers are filled in for you
+              (mail.privateemail.com, ports 465 and 993). Set up SPF, DKIM and DMARC for the
+              domain first, and keep the daily limit low while the mailbox warms up.
+            </p>
           </div>
         </CardContent>
       </Card>

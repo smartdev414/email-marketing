@@ -39,6 +39,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { SmtpConnectDialog } from "@/components/integrations/smtp-connect-dialog";
 
 type Props = {
   mailbox: {
@@ -50,6 +51,11 @@ type Props = {
     isActive: boolean;
     /** False once the tokens were cleared by a disconnect. */
     connected: boolean;
+    /** Server settings of an SMTP mailbox, prefilled when reconnecting. */
+    smtpHost: string | null;
+    smtpPort: number | null;
+    imapHost: string | null;
+    imapPort: number | null;
   };
   defaultLimit: number;
 };
@@ -79,6 +85,7 @@ export function MailboxActiveSwitch({ mailbox }: Pick<Props, "mailbox">) {
 export function MailboxActions({ mailbox, defaultLimit }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const [fromName, setFromName] = useState(mailbox.fromName ?? "");
@@ -129,14 +136,21 @@ export function MailboxActions({ mailbox, defaultLimit }: Props) {
             <Pencil className="size-4" />
             Sender settings
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <a
-              href={`/api/integrations/${mailbox.provider === "microsoft" ? "microsoft" : "google"}/connect?hint=${encodeURIComponent(mailbox.email)}`}
-            >
+          {mailbox.provider === "smtp" ? (
+            <DropdownMenuItem onSelect={() => setReconnecting(true)}>
               <RefreshCw className="size-4" />
               Reconnect
-            </a>
-          </DropdownMenuItem>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem asChild>
+              <a
+                href={`/api/integrations/${mailbox.provider === "microsoft" ? "microsoft" : "google"}/connect?hint=${encodeURIComponent(mailbox.email)}`}
+              >
+                <RefreshCw className="size-4" />
+                Reconnect
+              </a>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
             {mailbox.connected ? <Unplug className="size-4" /> : <Trash2 className="size-4" />}
@@ -198,6 +212,14 @@ export function MailboxActions({ mailbox, defaultLimit }: Props) {
         </DialogContent>
       </Dialog>
 
+      {mailbox.provider === "smtp" ? (
+        <SmtpConnectDialog
+          mailbox={mailbox}
+          open={reconnecting}
+          onOpenChange={setReconnecting}
+        />
+      ) : null}
+
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -206,7 +228,7 @@ export function MailboxActions({ mailbox, defaultLimit }: Props) {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {mailbox.connected
-                ? "Campaigns stop sending from it and its stored access tokens are deleted. Reconnect the same address later to pick its conversations back up."
+                ? "Campaigns stop sending from it and its stored access tokens or password are deleted. Reconnect the same address later to pick its conversations back up."
                 : "The mailbox is deleted. Sent history stays, but replies and follow-ups for conversations it started can no longer be sent."}
             </AlertDialogDescription>
           </AlertDialogHeader>

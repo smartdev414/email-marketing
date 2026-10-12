@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { gmailCapabilities } from "@/auth.config";
 import { MAILBOX_STATE_COOKIE, exchangeMailboxCode } from "@/lib/google";
+import { providerLabel } from "@/lib/mailbox";
 import { prisma } from "@/lib/prisma";
 import { appUrl } from "@/lib/tracking";
 
@@ -82,7 +83,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (existing && existing.provider !== "google") {
-    return back({ error: `${email} is already connected as an Outlook mailbox.` });
+    return back({ error: `${email} is already connected through ${providerLabel(existing)}.` });
   }
 
   // Google only sends a refresh token on first consent; keep the old one if
