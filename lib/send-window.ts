@@ -56,6 +56,28 @@ export function startOfSendDay(date = new Date()) {
   return new Date(Date.UTC(year, month - 1, day) - offset);
 }
 
+/** Midnight on the Monday of this week in the sending timezone. */
+export function startOfSendWeek(date = new Date()) {
+  return daysBefore(startOfSendDay(date), (zonedParts(date).weekday + 6) % 7);
+}
+
+/** Midnight on the 1st of this month in the sending timezone. */
+export function startOfSendMonth(date = new Date()) {
+  return daysBefore(startOfSendDay(date), zonedParts(date).day - 1);
+}
+
+/**
+ * Steps back whole local days from a midnight. Each step re-derives midnight,
+ * so days that are 23 or 25 hours long across a DST change still line up.
+ */
+export function daysBefore(midnight: Date, days: number) {
+  let day = midnight;
+  for (let step = 0; step < days; step += 1) {
+    day = startOfSendDay(new Date(day.getTime() - 1));
+  }
+  return day;
+}
+
 /** Human description for error messages, e.g. "Mon–Fri 9:00–20:00 America/New_York". */
 export function describeSendWindow() {
   const days =

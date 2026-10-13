@@ -2,6 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Send } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cn } from "cn";
 
 import { CampaignRowActions } from "@/components/campaigns/campaign-row-actions";
 import {
@@ -152,13 +153,16 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
   });
 
   const counts = new Map(grouped.map((row) => [row.campaignId, row._count]));
-  // Still-queued recipients, so the Edit dialog knows how far the audience can shrink.
-  const pendingGroups = await prisma.campaignRecipient.groupBy({
-    by: ["campaignId"],
-    where: { status: "PENDING" },
+  // Failed recipients for the Failed column, and still-queued ones so the Edit
+  // dialog knows how far the audience can shrink.
+  const statusGroups = await prisma.campaignRecipient.groupBy({
+    by: ["campaignId", "status"],
+    where: { status: { in: ["PENDING", "FAILED"] } },
     _count: { _all: true },
   });
-  const pendingOf = new Map(pendingGroups.map((row) => [row.campaignId, row._count._all]));
+  const statusCount = (campaignId: string, status: "PENDING" | "FAILED") =>
+    statusGroups.find((row) => row.campaignId === campaignId && row.status === status)?._count
+      ._all ?? 0;
   const lastSent = new Map(grouped.map((row) => [row.campaignId, row._max.sentAt]));
 
   // Result-based sorts need the counters above, so they happen here.
@@ -267,6 +271,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Audience</TableHead>
                       <TableHead className="text-right">Sent</TableHead>
+                      <TableHead className="text-right">Failed</TableHead>
                       <TableHead className="text-right">Opens</TableHead>
                       <TableHead className="text-right">Replies</TableHead>
                       <TableHead>Created</TableHead>
@@ -282,6 +287,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       const sent = bucket?.sentAt ?? 0;
                       const opened = bucket?.firstOpenedAt ?? 0;
                       const replied = bucket?.repliedAt ?? 0;
+                      const failed = statusCount(campaign.id, "FAILED");
                       const lastBroadcast = lastSent.get(campaign.id);
 
                       return (
@@ -310,6 +316,14 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                             {campaign._count.recipients}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">{sent}</TableCell>
+                          <TableCell
+                            className={cn(
+                              "text-right tabular-nums",
+                              failed > 0 ? "text-destructive" : "text-muted-foreground",
+                            )}
+                          >
+                            {failed}
+                          </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {opened}
                             <span className="text-muted-foreground ml-1 text-xs">
@@ -340,7 +354,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                                 templateName: campaign.template.name,
                                 audienceSize: campaign._count.recipients,
                                 processed:
-                                  campaign._count.recipients - (pendingOf.get(campaign.id) ?? 0),
+                                  campaign._count.recipients - statusCount(campaign.id, "PENDING"),
                                 batchSize: campaign.batchSize,
                                 trackOpens: campaign.trackOpens,
                                 trackClicks: campaign.trackClicks,
