@@ -1,5 +1,6 @@
 import { getGmail } from "@/lib/google";
 import { buildMime, findAddresses } from "@/lib/mail/mime";
+import { isSendLimitNotice } from "@/lib/mailbox";
 import type { MailboxRef, SendOptions, SendResult, ThreadReply } from "@/lib/mail/types";
 
 function base64Url(input: string) {
@@ -133,6 +134,9 @@ export async function gmailBouncedAddresses(mailbox: MailboxRef, days: number) {
       metadataHeaders: ["X-Failed-Recipients", "To", "Subject"],
     });
 
+    // Our own sending limit, not a bad address: never suppress the recipient.
+    if (isSendLimitNotice(message.data.snippet)) continue;
+
     const failedHeader = headerValue(message.data.payload?.headers, "X-Failed-Recipients");
     const failed = findAddresses(failedHeader);
     const candidates = failed.length > 0 ? failed : findAddresses(message.data.snippet);
@@ -149,4 +153,29 @@ export async function gmailBouncedAddresses(mailbox: MailboxRef, days: number) {
   }
 
   return bounced;
+}
+
+/**
+ * Threads where Gmail refused to deliver because the mailbox hit its sending
+ * limit, with when the notice came. It lands in the thread of the email that
+ * was not sent.
+ */
+export async function gmailSendLimitNotices(mailbox: MailboxRef, days: number) {
+  const gmail = await getGmail(mailbox.id);
+
+  const list = await gmail.users.messages.list({
+    userId: "me",
+    q: `from:(mailer-daemon OR postmaster) "limit for sending mail" newer_than:${days}d`,
+    maxResults: 100,
+  });
+
+  const notices = new Map<string, Date>();
+  for (const item of list.data.messages ?? []) {
+    if (!item.id || !item.threadId) continue;
+    const message = await gmail.users.messages.get({ userId: "me", id: item.id, format: "minimal" });
+    const receivedAt = new Date(Number(message.data.internalDate ?? Date.now()));
+    const known = notices.get(item.threadId);
+    if (!known || receivedAt > known) notices.set(item.threadId, receivedAt);
+  }
+  return notices;
 }

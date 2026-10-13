@@ -5,7 +5,12 @@ import { z } from "zod";
 
 import { requireUser } from "@/auth";
 import { verifyImapLogin, verifySmtpLogin } from "@/lib/mail/smtp";
-import { MailboxConnectionError, providerLabel, SMTP_SCOPE } from "@/lib/mailbox";
+import {
+  MailboxConnectionError,
+  providerLabel,
+  SEND_LIMIT_ERROR,
+  SMTP_SCOPE,
+} from "@/lib/mailbox";
 import { prisma } from "@/lib/prisma";
 import { encryptSecret } from "@/lib/secret-box";
 
@@ -17,7 +22,7 @@ async function findOwnedMailbox(id: string) {
 
   const mailbox = await prisma.emailAccount.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, lastError: true },
   });
 
   if (!mailbox) return null;
@@ -64,7 +69,14 @@ export async function setMailboxActive(id: string, isActive: boolean): Promise<A
   const mailbox = await findOwnedMailbox(id);
   if (!mailbox) return { ok: false, error: "Mailbox not found" };
 
-  await prisma.emailAccount.update({ where: { id }, data: { isActive } });
+  await prisma.emailAccount.update({
+    where: { id },
+    data: {
+      isActive,
+      // Switching back on is how a sending-limit pause ends.
+      ...(isActive && mailbox.lastError === SEND_LIMIT_ERROR ? { lastError: null } : {}),
+    },
+  });
 
   refresh();
   return { ok: true };

@@ -2,12 +2,14 @@ import { gmailProfileName } from "@/lib/google";
 import {
   gmailBouncedAddresses,
   gmailRecentInboxThreadIds,
+  gmailSendLimitNotices,
   gmailThreadReplies,
   sendGmail,
 } from "@/lib/mail/gmail";
 import {
   outlookBouncedAddresses,
   outlookRecentInboxThreadIds,
+  outlookSendLimitNotices,
   outlookThreadReplies,
   sendOutlook,
 } from "@/lib/mail/outlook";
@@ -82,6 +84,20 @@ export async function fetchRecentInboxThreadIds(emailAccountId: string, days = 3
     smtp: smtpRecentInboxThreadIds,
   }[provider];
   return recent(mailbox, days);
+}
+
+/**
+ * Threads whose email the provider refused to deliver because the mailbox hit
+ * its sending limit, each with when the notice arrived. SMTP servers refuse
+ * those at send time instead (see `MailboxBusyError`), so there is nothing to
+ * look for afterwards.
+ */
+export async function fetchSendLimitNotices(emailAccountId: string, days = 3) {
+  const { mailbox, provider } = await findMailbox(emailAccountId);
+  if (provider === "smtp") return new Map<string, Date>();
+  return provider === "microsoft"
+    ? outlookSendLimitNotices(mailbox, days)
+    : gmailSendLimitNotices(mailbox, days);
 }
 
 /** Failed recipient addresses from recent delivery-failure notices. */

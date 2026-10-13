@@ -25,7 +25,13 @@ import {
 } from "@/components/ui/table";
 import { DAILY_SEND_LIMIT } from "@/lib/deliverability";
 import { integrationRedirectUri } from "@/lib/google";
-import { blockedByLabel, isBlockedAccount, mailboxReady, providerLabel } from "@/lib/mailbox";
+import {
+  blockedByLabel,
+  isBlockedAccount,
+  mailboxReady,
+  providerLabel,
+  SEND_LIMIT_ERROR,
+} from "@/lib/mailbox";
 import { microsoftConfigured, microsoftRedirectUri } from "@/lib/microsoft";
 import { paginate, parsePage } from "@/lib/pagination";
 import { mailboxQuotas } from "@/lib/suppression";
@@ -49,7 +55,7 @@ const SORTS = [
   { value: "campaigns", label: "Most campaigns" },
 ];
 
-type MailboxStatus = "ready" | "paused" | "reconnect" | "blocked";
+type MailboxStatus = "ready" | "paused" | "reconnect" | "blocked" | "limited";
 
 const PAGE_SIZE = 10;
 
@@ -124,6 +130,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
   // Same order of checks as the Status badge below.
   function statusOf(mailbox: (typeof mailboxes)[number]): MailboxStatus {
     if (mailbox.lastError && isBlockedAccount(mailbox.lastError)) return "blocked";
+    if (mailbox.lastError === SEND_LIMIT_ERROR) return "limited";
     if (!mailboxReady(mailbox) || mailbox.lastError) return "reconnect";
     return mailbox.isActive ? "ready" : "paused";
   }
@@ -138,7 +145,9 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
       return false;
     }
     const status = statusOf(mailbox);
-    if (statusFilter === "attention") return status === "reconnect" || status === "blocked";
+    if (statusFilter === "attention") {
+      return status === "reconnect" || status === "blocked" || status === "limited";
+    }
     return statusFilter === "all" || status === statusFilter;
   });
 
@@ -301,6 +310,8 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                             <Badge variant="destructive">
                               Blocked by {blockedByLabel(mailbox)}
                             </Badge>
+                          ) : mailbox.lastError === SEND_LIMIT_ERROR ? (
+                            <Badge variant="secondary">Sending limit hit</Badge>
                           ) : !ready || mailbox.lastError ? (
                             <Badge variant="destructive">Reconnect needed</Badge>
                           ) : !mailbox.isActive ? (

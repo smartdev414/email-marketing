@@ -138,6 +138,22 @@ export function isRevokedGrant(error: unknown) {
 }
 
 /**
+ * The provider's notice that it refused to deliver because the mailbox hit its
+ * sending limit (Gmail and Outlook.com: "You have reached a limit for sending
+ * mail. Your message was not sent."). The send call itself had succeeded.
+ */
+const SEND_LIMIT_NOTICE =
+  /reached a limit for sending mail|exceeded (?:the |your )?sending limit|sending limit (?:has been |was )?(?:exceeded|reached)/i;
+
+export function isSendLimitNotice(text: string | null | undefined) {
+  return SEND_LIMIT_NOTICE.test(text ?? "");
+}
+
+/** Stored as `lastError` on a mailbox paused for hitting its sending limit. */
+export const SEND_LIMIT_ERROR =
+  "Sending limit reached — the provider stopped delivering. Switch it back on tomorrow.";
+
+/**
  * The provider suspended the account itself — Microsoft's "User account is
  * found to be in service abuse mode" / "… to be blocked", or a disabled
  * (AADSTS50057) or locked (AADSTS50053) account. Unlike an expired grant, reconnecting cannot fix this until the

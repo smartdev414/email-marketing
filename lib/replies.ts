@@ -1,7 +1,17 @@
 import { revalidatePath } from "next/cache";
 
-import { fetchRecentInboxThreadIds, fetchThreadReplies, type ThreadReply } from "@/lib/mailer";
-import { isBlockedAccount, pauseBlockedMailbox } from "@/lib/mailbox";
+import {
+  fetchRecentInboxThreadIds,
+  fetchSendLimitNotices,
+  fetchThreadReplies,
+  type ThreadReply,
+} from "@/lib/mailer";
+import {
+  isBlockedAccount,
+  pauseBlockedMailbox,
+  providerLabel,
+  SEND_LIMIT_ERROR,
+} from "@/lib/mailbox";
 import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 
@@ -86,6 +96,71 @@ export async function recordReply(recipientId: string, reply: ThreadReply) {
 }
 
 /**
+ * A limit notice arrives seconds after the send; follow-ups go out days later.
+ * It can also be stamped a moment before `sentAt`, which is recorded only once
+ * the provider's API call returns.
+ */
+const NOTICE_WINDOW_MS = 30 * 60_000;
+const NOTICE_EARLY_MS = 2 * 60_000;
+
+/**
+ * The provider accepted these emails, then refused to deliver them because the
+ * mailbox hit its sending limit. They were never sent: they become FAILED
+ * (without a send time, so they leave the Sent counts) and the mailbox is
+ * paused so it stops trying. The recipients did nothing wrong, so nothing is
+ * suppressed. Returns how many recipients were corrected.
+ */
+async function recordUnsent(
+  mailbox: { id: string; email: string; provider: string; userId: string },
+  notices: Map<string, Date>,
+) {
+  const label = providerLabel(mailbox);
+
+  // Only the email the notice answers: one sent shortly before it. An earlier
+  // email in the same thread was delivered, and an opened one plainly was.
+  const candidates = await prisma.campaignRecipient.findMany({
+    where: {
+      emailAccountId: mailbox.id,
+      gmailThreadId: { in: [...notices.keys()] },
+      status: "SENT",
+      repliedAt: null,
+    },
+    select: { id: true, gmailThreadId: true, sentAt: true },
+  });
+  const refused = candidates.filter((recipient) => {
+    const noticeAt = notices.get(recipient.gmailThreadId!)?.getTime() ?? 0;
+    const sentAt = recipient.sentAt?.getTime() ?? 0;
+    const gap = noticeAt - sentAt;
+    return sentAt > 0 && gap >= -NOTICE_EARLY_MS && gap <= NOTICE_WINDOW_MS;
+  });
+  if (refused.length === 0) return 0;
+
+  const unsent = await prisma.campaignRecipient.updateMany({
+    where: { id: { in: refused.map((recipient) => recipient.id) }, status: "SENT" },
+    data: {
+      status: "FAILED",
+      sentAt: null,
+      error: `Not sent — ${label} refused it: the mailbox hit its sending limit`,
+    },
+  });
+  if (unsent.count === 0) return 0;
+
+  await prisma.emailAccount.update({
+    where: { id: mailbox.id },
+    data: { isActive: false, lastError: SEND_LIMIT_ERROR },
+  });
+  await notify({
+    userId: mailbox.userId,
+    type: "MAILBOX_LIMIT_REACHED",
+    title: `${mailbox.email} hit ${label}'s sending limit`,
+    body: `${label} refused to deliver ${unsent.count} email${unsent.count === 1 ? "" : "s"}, now marked failed. The mailbox is paused; lower its daily limit before switching it back on.`,
+    url: "/integrations",
+    dedupeKey: `send-limit:${mailbox.id}:${new Date().toISOString().slice(0, 10)}`,
+  });
+  return unsent.count;
+}
+
+/**
  * Background pass: for each connected mailbox, list what recently arrived in
  * its inbox and record replies on threads a campaign started there.
  */
@@ -100,12 +175,16 @@ export async function checkReplies({ deadline }: { deadline: number }) {
 
   let checked = 0;
   let replies = 0;
+  let unsent = 0;
   const errors: string[] = [];
 
   for (const mailbox of mailboxes) {
     if (Date.now() > deadline) break;
 
     try {
+      const limited = await fetchSendLimitNotices(mailbox.id);
+      if (limited.size > 0) unsent += await recordUnsent(mailbox, limited);
+
       const threadIds = await fetchRecentInboxThreadIds(mailbox.id);
       checked += 1;
       if (threadIds.size === 0) continue;
@@ -132,11 +211,11 @@ export async function checkReplies({ deadline }: { deadline: number }) {
     }
   }
 
-  if (replies > 0) {
+  if (replies > 0 || unsent > 0) {
     revalidatePath("/inbox");
     revalidatePath("/dashboard");
     revalidatePath("/campaigns");
   }
 
-  return { mailboxes: mailboxes.length, checked, replies, errors };
+  return { mailboxes: mailboxes.length, checked, replies, unsent, errors };
 }

@@ -1,5 +1,6 @@
 import { buildMime, findAddresses } from "@/lib/mail/mime";
 import type { MailboxRef, SendOptions, SendResult, ThreadReply } from "@/lib/mail/types";
+import { isSendLimitNotice } from "@/lib/mailbox";
 import { getGraph, GraphError, type Graph } from "@/lib/microsoft";
 
 /**
@@ -170,6 +171,15 @@ export async function outlookRecentInboxThreadIds(mailbox: MailboxRef, days: num
 const BOUNCE_SUBJECT =
   /^(undeliverable|undelivered|delivery has failed|delivery status notification|mail delivery failed|returned mail|failure notice)/i;
 
+/** Delivery notices come from a system address, a "Mail Delivery …" sender or with a bounce subject. */
+function isSystemNotice(message: GraphMessage) {
+  return (
+    SYSTEM_SENDER.test(addressOf(message)) ||
+    /^mail delivery/i.test(message.from?.emailAddress?.name ?? "") ||
+    BOUNCE_SUBJECT.test(message.subject ?? "")
+  );
+}
+
 /**
  * Reads non-delivery reports out of the inbox. Exchange NDRs come from
  * postmaster with an "Undeliverable:" subject and name the failed address at
@@ -189,9 +199,9 @@ export async function outlookBouncedAddresses(mailbox: MailboxRef, days: number)
   const bounced = new Map<string, Date>();
 
   for (const message of messages) {
-    const isNotice =
-      SYSTEM_SENDER.test(addressOf(message)) || BOUNCE_SUBJECT.test(message.subject ?? "");
-    if (!isNotice) continue;
+    if (!isSystemNotice(message)) continue;
+    // Our own sending limit, not a bad address: never suppress the recipient.
+    if (isSendLimitNotice(message.bodyPreview)) continue;
 
     const receivedAt = message.receivedDateTime ? new Date(message.receivedDateTime) : new Date();
 
@@ -204,4 +214,29 @@ export async function outlookBouncedAddresses(mailbox: MailboxRef, days: number)
   }
 
   return bounced;
+}
+
+/**
+ * Conversations where Outlook refused to deliver because the mailbox hit its
+ * sending limit, with when the notice came. It joins the conversation of the
+ * email that was not sent.
+ */
+export async function outlookSendLimitNotices(mailbox: MailboxRef, days: number) {
+  const graph = await getGraph(mailbox.id);
+
+  const filter = encodeURIComponent(`receivedDateTime ge ${sinceIso(days)}`);
+  const messages = await listAll<GraphMessage>(
+    graph,
+    `/me/mailFolders/inbox/messages?$filter=${filter}&$select=conversationId,subject,from,bodyPreview,receivedDateTime&$top=250`,
+    1000,
+  );
+
+  const notices = new Map<string, Date>();
+  for (const message of messages) {
+    if (!isSystemNotice(message) || !isSendLimitNotice(message.bodyPreview)) continue;
+    const receivedAt = message.receivedDateTime ? new Date(message.receivedDateTime) : new Date();
+    const known = notices.get(message.conversationId);
+    if (!known || receivedAt > known) notices.set(message.conversationId, receivedAt);
+  }
+  return notices;
 }
