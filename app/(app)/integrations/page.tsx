@@ -49,7 +49,7 @@ const SORTS = [
   { value: "campaigns", label: "Most campaigns" },
 ];
 
-type MailboxStatus = "ready" | "paused" | "reconnect" | "disconnected";
+type MailboxStatus = "ready" | "paused" | "reconnect";
 
 const PAGE_SIZE = 10;
 
@@ -86,7 +86,9 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
   const sort = SORTS.find((option) => option.value === params.sort)?.value ?? "oldest";
 
   const mailboxes = await prisma.emailAccount.findMany({
-    where: { userId },
+    // Disconnected mailboxes (no stored token or password) are hidden. Their
+    // rows are kept, so reconnecting the address brings its history back.
+    where: { userId, accessToken: { not: null } },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
@@ -100,7 +102,6 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
       imapHost: true,
       imapPort: true,
       scope: true,
-      accessToken: true,
       refreshToken: true,
       lastError: true,
       createdAt: true,
@@ -122,7 +123,6 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
 
   // Same order of checks as the Status badge below.
   function statusOf(mailbox: (typeof mailboxes)[number]): MailboxStatus {
-    if (!mailbox.accessToken) return "disconnected";
     if (!mailboxReady(mailbox) || mailbox.lastError) return "reconnect";
     return mailbox.isActive ? "ready" : "paused";
   }
@@ -137,7 +137,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
       return false;
     }
     const status = statusOf(mailbox);
-    if (statusFilter === "attention") return status === "reconnect" || status === "disconnected";
+    if (statusFilter === "attention") return status === "reconnect";
     return statusFilter === "all" || status === statusFilter;
   });
 
@@ -265,8 +265,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                 <TableBody>
                   {pageOfMailboxes.items.map((mailbox) => {
                     const quota = quotas.get(mailbox.id);
-                    const hasTokens = Boolean(mailbox.accessToken);
-                    const ready = hasTokens && mailboxReady(mailbox);
+                    const ready = mailboxReady(mailbox);
                     // Only these fields cross into client components — never the tokens.
                     const safe = {
                       id: mailbox.id,
@@ -275,7 +274,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                       fromName: mailbox.fromName,
                       dailyLimit: mailbox.dailyLimit,
                       isActive: mailbox.isActive,
-                      connected: hasTokens,
+                      connected: true,
                       smtpHost: mailbox.smtpHost,
                       smtpPort: mailbox.smtpPort,
                       imapHost: mailbox.imapHost,
@@ -297,9 +296,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                           </p>
                         </TableCell>
                         <TableCell>
-                          {!hasTokens ? (
-                            <Badge variant="outline">Disconnected</Badge>
-                          ) : !ready || mailbox.lastError ? (
+                          {!ready || mailbox.lastError ? (
                             <Badge variant="destructive">Reconnect needed</Badge>
                           ) : !mailbox.isActive ? (
                             <Badge variant="secondary">Paused</Badge>
@@ -320,7 +317,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
                           {mailbox._count.campaigns}
                         </TableCell>
                         <TableCell>
-                          {hasTokens ? <MailboxActiveSwitch mailbox={safe} /> : null}
+                          <MailboxActiveSwitch mailbox={safe} />
                         </TableCell>
                         <TableCell>
                           <MailboxActions
