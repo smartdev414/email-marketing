@@ -1,5 +1,7 @@
 import { gmailCapabilities } from "@/auth.config";
+import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
+import { startOfSendDay } from "@/lib/send-window";
 
 /**
  * Provider-neutral mailbox helpers. `EmailAccount.provider` says which API a
@@ -133,4 +135,51 @@ export function isRevokedGrant(error: unknown) {
   return /invalid_grant|invalid_client|unauthorized_client|interaction_required|AADSTS(50173|50076|65001|70000|70008|700082|700084)|Outlook 40[13] (ErrorAccessDenied|InvalidAuthenticationToken)/i.test(
     message,
   );
+}
+
+/**
+ * The provider suspended the account itself — Microsoft's "User account is
+ * found to be in service abuse mode" / "… to be blocked", or a disabled
+ * (AADSTS50057) or locked (AADSTS50053) account. Unlike an expired grant, reconnecting cannot fix this until the
+ * owner unlocks the account with the provider.
+ */
+export function isBlockedAccount(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /account is found to be (blocked|in service abuse mode)|AADSTS5005[37]\b|ErrorAccountSuspend/i.test(
+    message,
+  );
+}
+
+/** Who blocked it, for messages: the company, not the product. */
+export function blockedByLabel(mailbox: { provider: string }) {
+  const provider = providerOf(mailbox);
+  if (provider === "microsoft") return "Microsoft";
+  if (provider === "google") return "Google";
+  return "the mail provider";
+}
+
+/**
+ * Takes a blocked mailbox out of every campaign (paused, so nothing retries
+ * it) and tells its owner, once a day at most while it stays blocked.
+ */
+export async function pauseBlockedMailbox(
+  mailbox: { id: string; email: string; provider: string; userId: string },
+  error: unknown,
+) {
+  const by = blockedByLabel(mailbox);
+  await prisma.emailAccount.update({
+    where: { id: mailbox.id },
+    data: {
+      lastError: error instanceof Error ? error.message : String(error),
+      isActive: false,
+    },
+  });
+  await notify({
+    userId: mailbox.userId,
+    type: "MAILBOX_DISCONNECTED",
+    title: `${mailbox.email} was blocked by ${by}`,
+    body: `${by} suspended this account, so it has been paused and taken out of every campaign. Reconnecting will not help until the account is unlocked with ${by}.`,
+    url: "/integrations",
+    dedupeKey: `blocked:${mailbox.id}:${startOfSendDay().toISOString()}`,
+  });
 }

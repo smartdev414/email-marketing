@@ -2,10 +2,12 @@ import { revalidatePath } from "next/cache";
 
 import { REJECTION_LABELS, screenAddress, sendDelay, sleep } from "@/lib/deliverability";
 import {
+  isBlockedAccount,
   isRevokedGrant,
   MailboxBusyError,
   MailboxConnectionError,
   mailboxReady,
+  pauseBlockedMailbox,
   providerLabel,
 } from "@/lib/mailbox";
 import { mailboxSenderName, sendEmail } from "@/lib/mailer";
@@ -309,6 +311,14 @@ async function sendLockedBatch(
 
       // A dead mailbox is not the recipient's fault: drop the mailbox from the
       // rotation and leave the recipient queued for the next batch.
+      if (isBlockedAccount(error)) {
+        // Suspended by the provider: paused, so later batches stop trying it.
+        slot.remaining = 0;
+        brokenMailboxes.push(sender.email);
+        await pauseBlockedMailbox(sender, error);
+        continue;
+      }
+
       if (error instanceof MailboxConnectionError || isRevokedGrant(error)) {
         slot.remaining = 0;
         brokenMailboxes.push(sender.email);

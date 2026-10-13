@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 
 import { fetchRecentInboxThreadIds, fetchThreadReplies, type ThreadReply } from "@/lib/mailer";
+import { isBlockedAccount, pauseBlockedMailbox } from "@/lib/mailbox";
 import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 
@@ -94,7 +95,7 @@ export async function checkReplies({ deadline }: { deadline: number }) {
       accessToken: { not: null },
       recipients: { some: { repliedAt: null, gmailThreadId: { not: null } } },
     },
-    select: { id: true, email: true },
+    select: { id: true, email: true, provider: true, userId: true },
   });
 
   let checked = 0;
@@ -125,6 +126,8 @@ export async function checkReplies({ deadline }: { deadline: number }) {
         if (inbound.length > 0 && (await recordReply(recipient.id, inbound[0]))) replies += 1;
       }
     } catch (error) {
+      // Caught here too, so a blocked mailbox is paused even between campaigns.
+      if (isBlockedAccount(error)) await pauseBlockedMailbox(mailbox, error);
       errors.push(`${mailbox.email}: ${error instanceof Error ? error.message : "unreachable"}`);
     }
   }
