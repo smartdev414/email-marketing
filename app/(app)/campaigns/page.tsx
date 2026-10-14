@@ -273,6 +273,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                       <TableHead className="text-right">Sent</TableHead>
                       <TableHead className="text-right">Failed</TableHead>
                       <TableHead className="text-right">Opens</TableHead>
+                      <TableHead className="text-right">Open rate</TableHead>
                       <TableHead className="text-right">Replies</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead>Last broadcast</TableHead>
@@ -326,9 +327,13 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {opened}
-                            <span className="text-muted-foreground ml-1 text-xs">
-                              {rate(opened, sent)}%
-                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {sent > 0 ? (
+                              `${rate(opened, sent)}%`
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {replied}
