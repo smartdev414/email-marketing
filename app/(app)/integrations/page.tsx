@@ -6,6 +6,12 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { EmptyState } from "@/components/empty-state";
 import { MailboxActions, MailboxActiveSwitch } from "@/components/integrations/mailbox-actions";
+import {
+  MailboxBulkBar,
+  MailboxRowCheckbox,
+  MailboxSelectAll,
+  MailboxSelectionProvider,
+} from "@/components/integrations/mailbox-selection";
 import { SmtpConnectDialog } from "@/components/integrations/smtp-connect-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Pagination } from "@/components/pagination";
@@ -230,131 +236,141 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
           </CardContent>
         ) : (
           <CardContent className="p-0">
-            <div className="flex flex-wrap items-center gap-2 px-(--card-spacing) pb-4">
-              <SearchInput placeholder="Search email or name…" />
-              <div className="flex flex-wrap gap-1">
-                {STATUS_FILTERS.map((filter) => (
-                  <Button
-                    key={filter.value}
-                    asChild
-                    size="sm"
-                    variant={statusFilter === filter.value ? "secondary" : "ghost"}
-                  >
-                    <Link href={statusHref(filter.value)}>{filter.label}</Link>
-                  </Button>
-                ))}
+            <MailboxSelectionProvider>
+              <div className="flex flex-wrap items-center gap-2 px-(--card-spacing) pb-4">
+                <SearchInput placeholder="Search email or name…" />
+                <div className="flex flex-wrap gap-1">
+                  {STATUS_FILTERS.map((filter) => (
+                    <Button
+                      key={filter.value}
+                      asChild
+                      size="sm"
+                      variant={statusFilter === filter.value ? "secondary" : "ghost"}
+                    >
+                      <Link href={statusHref(filter.value)}>{filter.label}</Link>
+                    </Button>
+                  ))}
+                </div>
+                <UrlSelect param="sort" label="Sort mailboxes" defaultValue="oldest" options={SORTS} />
+                <p className="text-muted-foreground ml-auto text-sm tabular-nums">
+                  {visible.length === mailboxes.length
+                    ? `${mailboxes.length} mailbox${mailboxes.length === 1 ? "" : "es"}`
+                    : `${visible.length} of ${mailboxes.length} mailboxes`}
+                </p>
               </div>
-              <UrlSelect param="sort" label="Sort mailboxes" defaultValue="oldest" options={SORTS} />
-              <p className="text-muted-foreground ml-auto text-sm tabular-nums">
-                {visible.length === mailboxes.length
-                  ? `${mailboxes.length} mailbox${mailboxes.length === 1 ? "" : "es"}`
-                  : `${visible.length} of ${mailboxes.length} mailboxes`}
-              </p>
-            </div>
 
-            {visible.length === 0 ? (
-              <div className="px-(--card-spacing) pb-6">
-                <EmptyState
-                  icon={Mail}
-                  title="No matching mailboxes"
-                  description="Try a different search or status."
-                />
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Mailbox</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Today</TableHead>
-                    <TableHead className="text-right">Campaigns</TableHead>
-                    <TableHead>Active</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pageOfMailboxes.items.map((mailbox) => {
-                    const quota = quotas.get(mailbox.id);
-                    const ready = mailboxReady(mailbox);
-                    // Only these fields cross into client components — never the tokens.
-                    const safe = {
-                      id: mailbox.id,
-                      email: mailbox.email,
-                      provider: mailbox.provider,
-                      fromName: mailbox.fromName,
-                      dailyLimit: mailbox.dailyLimit,
-                      isActive: mailbox.isActive,
-                      connected: true,
-                      smtpHost: mailbox.smtpHost,
-                      smtpPort: mailbox.smtpPort,
-                      imapHost: mailbox.imapHost,
-                      imapPort: mailbox.imapPort,
-                    };
+              <MailboxBulkBar />
 
-                    return (
-                      <TableRow key={mailbox.id}>
-                        <TableCell>
-                          <p className="flex items-center gap-2 font-medium">
-                            {mailbox.email}
-                            <Badge variant="outline" className="font-normal">
-                              {providerLabel(mailbox)}
-                            </Badge>
-                          </p>
-                          <p className="text-muted-foreground text-xs">
-                            {mailbox.fromName ? `Sends as ${mailbox.fromName} · ` : ""}
-                            added {formatDistanceToNow(mailbox.createdAt, { addSuffix: true })}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          {mailbox.lastError && isBlockedAccount(mailbox.lastError) ? (
-                            <Badge variant="destructive">
-                              Blocked by {blockedByLabel(mailbox)}
-                            </Badge>
-                          ) : mailbox.lastError === SEND_LIMIT_ERROR ? (
-                            <Badge variant="secondary">Sending limit hit</Badge>
-                          ) : !ready || mailbox.lastError ? (
-                            <Badge variant="destructive">Reconnect needed</Badge>
-                          ) : !mailbox.isActive ? (
-                            <Badge variant="secondary">Paused</Badge>
-                          ) : (
-                            <Badge>Ready</Badge>
-                          )}
-                          {mailbox.lastError ? (
-                            <p className="text-destructive mt-1 max-w-xs truncate text-xs">
-                              {mailbox.lastError}
+              {visible.length === 0 ? (
+                <div className="px-(--card-spacing) pb-6">
+                  <EmptyState
+                    icon={Mail}
+                    title="No matching mailboxes"
+                    description="Try a different search or status."
+                  />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10 pl-(--card-spacing)">
+                        <MailboxSelectAll ids={pageOfMailboxes.items.map((mailbox) => mailbox.id)} />
+                      </TableHead>
+                      <TableHead>Mailbox</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Today</TableHead>
+                      <TableHead className="text-right">Campaigns</TableHead>
+                      <TableHead>Active</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageOfMailboxes.items.map((mailbox) => {
+                      const quota = quotas.get(mailbox.id);
+                      const ready = mailboxReady(mailbox);
+                      // Only these fields cross into client components — never the tokens.
+                      const safe = {
+                        id: mailbox.id,
+                        email: mailbox.email,
+                        provider: mailbox.provider,
+                        fromName: mailbox.fromName,
+                        dailyLimit: mailbox.dailyLimit,
+                        isActive: mailbox.isActive,
+                        connected: true,
+                        smtpHost: mailbox.smtpHost,
+                        smtpPort: mailbox.smtpPort,
+                        imapHost: mailbox.imapHost,
+                        imapPort: mailbox.imapPort,
+                      };
+
+                      return (
+                        <TableRow key={mailbox.id}>
+                          <TableCell className="pl-(--card-spacing)">
+                            <MailboxRowCheckbox id={mailbox.id} email={mailbox.email} />
+                          </TableCell>
+                          <TableCell>
+                            <p className="flex items-center gap-2 font-medium">
+                              {mailbox.email}
+                              <Badge variant="outline" className="font-normal">
+                                {providerLabel(mailbox)}
+                              </Badge>
                             </p>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {quota?.sentToday ?? 0}
-                          <span className="text-muted-foreground"> / {quota?.limit ?? DAILY_SEND_LIMIT}</span>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {mailbox._count.campaigns}
-                        </TableCell>
-                        <TableCell>
-                          <MailboxActiveSwitch mailbox={safe} />
-                        </TableCell>
-                        <TableCell>
-                          <MailboxActions
-                            mailbox={safe}
-                            defaultLimit={DAILY_SEND_LIMIT}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-            <Pagination
-              {...pageOfMailboxes}
-              pathname="/integrations"
-              // Not `connected` / `error`: those are one-off banners.
-              params={{ q: params.q, status: params.status, sort: params.sort }}
-              noun="mailboxes"
-              className="px-(--card-spacing) pt-4"
-            />
+                            <p className="text-muted-foreground text-xs">
+                              {mailbox.fromName ? `Sends as ${mailbox.fromName} · ` : ""}
+                              added {formatDistanceToNow(mailbox.createdAt, { addSuffix: true })}
+                            </p>
+                          </TableCell>
+                          <TableCell>
+                            {mailbox.lastError && isBlockedAccount(mailbox.lastError) ? (
+                              <Badge variant="destructive">
+                                Blocked by {blockedByLabel(mailbox)}
+                              </Badge>
+                            ) : mailbox.lastError === SEND_LIMIT_ERROR ? (
+                              <Badge variant="secondary">Sending limit hit</Badge>
+                            ) : !ready || mailbox.lastError ? (
+                              <Badge variant="destructive">Reconnect needed</Badge>
+                            ) : !mailbox.isActive ? (
+                              <Badge variant="secondary">Paused</Badge>
+                            ) : (
+                              <Badge>Ready</Badge>
+                            )}
+                            {mailbox.lastError ? (
+                              <p className="text-destructive mt-1 max-w-xs truncate text-xs">
+                                {mailbox.lastError}
+                              </p>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {quota?.sentToday ?? 0}
+                            <span className="text-muted-foreground"> / {quota?.limit ?? DAILY_SEND_LIMIT}</span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {mailbox._count.campaigns}
+                          </TableCell>
+                          <TableCell>
+                            <MailboxActiveSwitch mailbox={safe} />
+                          </TableCell>
+                          <TableCell>
+                            <MailboxActions
+                              mailbox={safe}
+                              defaultLimit={DAILY_SEND_LIMIT}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+              <Pagination
+                {...pageOfMailboxes}
+                pathname="/integrations"
+                // Not `connected` / `error`: those are one-off banners.
+                params={{ q: params.q, status: params.status, sort: params.sort }}
+                noun="mailboxes"
+                className="px-(--card-spacing) pt-4"
+              />
+            </MailboxSelectionProvider>
           </CardContent>
         )}
       </Card>

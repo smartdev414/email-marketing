@@ -203,3 +203,31 @@ export async function removeMailbox(id: string): Promise<ActionResult> {
   refresh();
   return { ok: true };
 }
+
+const mailboxIdsSchema = z.array(z.string().min(1)).min(1, "Select at least one mailbox").max(500);
+
+/**
+ * Deletes several mailboxes at once, with the same rule as `removeMailbox`:
+ * only your own, unless you are an admin. Sent history stays; threads are orphaned.
+ */
+export async function removeMailboxes(
+  ids: string[],
+): Promise<{ ok: true; removed: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+
+  const parsed = mailboxIdsSchema.safeParse(ids);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid selection" };
+  }
+
+  const { count } = await prisma.emailAccount.deleteMany({
+    where: {
+      id: { in: parsed.data },
+      ...(user.role === "ADMIN" ? {} : { userId: user.id }),
+    },
+  });
+  if (count === 0) return { ok: false, error: "None of those mailboxes could be deleted" };
+
+  refresh();
+  return { ok: true, removed: count };
+}
